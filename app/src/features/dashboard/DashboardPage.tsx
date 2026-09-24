@@ -734,29 +734,42 @@ export default function DashboardPage() {
               </label>
             </div>
 
-            {budgetAgg && !budgetLoading && !budgetError && (budgetAgg.partidas.length > 0 || budgetAgg.totals.budgeted > 0) && (
-              <div className={s.miniGrid}>
-                {([
-                  ['Presupuestado', money(budgetAgg.totals.budgeted)],
-                  ['Consumo global', money(budgetAgg.totals.used)],
-                  ['Saldo restante', money(budgetAgg.totals.available)],
-                  ['% usado', Number.isFinite(budgetAgg.totals.pctUsed) ? pct(budgetAgg.totals.pctUsed) : 'Sin presupuesto'],
-                ] as [string, string][]).map(([l, v]) => (
-                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                ))}
-              </div>
-            )}
+            {budgetAgg && !budgetLoading && !budgetError && (budgetAgg.partidas.length > 0 || budgetAgg.totals.budgeted > 0) && (() => {
+              // Héroe: un solo dato accionable — usado de presupuestado + % + barra, con el saldo al lado.
+              // Estado de la barra según la leyenda: en uso / cerca del límite (≥90%) / sobregirado.
+              const t = budgetAgg.totals
+              const over = t.available < 0
+              const near = !over && Number.isFinite(t.pctUsed) && t.pctUsed >= 90
+              const barTone = over ? s.barAlert : near ? s.barWarn : s.barOk
+              const pctTone = over ? s.alertText : near ? s.warnText : ''
+              const fillW = t.budgeted > 0 ? Math.max(0, Math.min(100, over ? 100 : t.pctUsed)) : (t.used > 0 ? 100 : 0)
+              const pctLabel = Number.isFinite(t.pctUsed) ? pct(t.pctUsed) : 'Sin presupuesto'
+              return (
+                <div className={s.budgetHero}>
+                  <div className={s.budgetHeroMain}>
+                    <div className={s.budgetHeroLine}>
+                      <strong className={s.heroValue}>{money(t.used)}</strong>
+                      <span className={s.heroUnit}>usado de {money(t.budgeted)}</span>
+                      <span className={`${s.heroPct} ${pctTone}`}>· {pctLabel}</span>
+                    </div>
+                    <div className={s.progressBar} role="img" aria-label={`${money(t.used)} usado de ${money(t.budgeted)} presupuestado, ${pctLabel}`}>
+                      <div className={`${s.progressFill} ${barTone}`} style={{ width: `${fillW}%` }} />
+                    </div>
+                  </div>
+                  <div className={s.budgetHeroSaldo}>
+                    <span>{over ? 'Sobregirado' : 'Saldo restante'}</span>
+                    <strong className={over ? s.alertText : undefined}>{money(t.available)}</strong>
+                  </div>
+                </div>
+              )
+            })()}
 
             {budgetAgg && budgetCoverage && !budgetLoading && !budgetError && <>
-              <div className={s.miniGrid} aria-label="Desglose del consumo global">
-                {([
-                  ['Pagado registrado en Flux', money(budgetCoverage.paid)],
-                  ['Ejecutado · base presupuestal', money(budgetAgg.totals.executed)],
-                  ['Comprometido por pagar', money(budgetAgg.totals.committed)],
-                  ['No presupuestal identificado en Flux', money(budgetCoverage.nonBudget)],
-                ] as [string, string][]).map(([label, value]) => (
-                  <div key={label} className={s.miniCard}><span>{label}</span><strong>{value}</strong></div>
-                ))}
+              <div className={s.heroBreakdown} aria-label="Desglose del consumo global">
+                <span>Pagado registrado en Flux<strong>{money(budgetCoverage.paid)}</strong></span>
+                <span>Ejecutado · base presupuestal<strong>{money(budgetAgg.totals.executed)}</strong></span>
+                <span>Comprometido por pagar<strong>{money(budgetAgg.totals.committed)}</strong></span>
+                <span>No presupuestal identificado en Flux<strong>{money(budgetCoverage.nonBudget)}</strong></span>
               </div>
               <p className={s.budgetOmitNote}>
                 {budgetCoverage.historicalMonths > 0 ? (
@@ -814,6 +827,8 @@ export default function DashboardPage() {
             )}
           </section>
 
+          {/* ── Fila 50/50: Solicitudes (izq) | Efectivo/Incidencias (der) ── */}
+          <div className={s.opsRow}>
           {/* ── Solicitudes: cómo van vs pagadas ── */}
           <section id="sec-requests" className={s.tableCard}>
             <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
@@ -837,18 +852,25 @@ export default function DashboardPage() {
               <div className={s.tableMsg}>Sin solicitudes para esta empresa o periodo.</div>
             )}
 
-            {!reqLoading && !reqError && requestsAgg && requestsAgg.total > 0 && (
+            {!reqLoading && !reqError && requestsAgg && requestsAgg.total > 0 && (() => {
+              // Los estatus son paralelos, no un flujo: una sola representación (la tabla),
+              // con lo accionable resaltado y una línea-resumen accionable arriba.
+              const paidCount = requestsAgg.funnel.find((f) => f.key === 'pagadas')?.count ?? 0
+              const totalAmount = requestsAgg.byStatus.reduce((a, r) => a + r.amount, 0)
+              const IN_PROGRESS = ['draft', 'submitted', 'pending_approval', 'changes_requested', 'finance_validation']
+              const reqTone = (status: string): string =>
+                status === 'paid' ? s.rowPaid
+                  : status === 'rejected' || status === 'cancelled' ? s.rowDanger
+                    : IN_PROGRESS.includes(status) ? s.rowAttention
+                      : ''
+              return (
               <>
-                {/* Embudo por etapa: conteo + monto */}
-                <div className={s.funnelRow}>
-                  {requestsAgg.funnel.map((st: RequestStage, i) => (
-                    <div key={st.key} className={`${s.funnelStage} ${st.key === 'pagadas' ? s.paid : ''}`}>
-                      <span className={s.funnelLabel}>{st.label}</span>
-                      <strong className={s.funnelCount}>{whole(st.count)}</strong>
-                      <span className={s.funnelAmount}>{requestAmountLabel(st)}</span>
-                      {i < requestsAgg.funnel.length - 1 && <span className={s.funnelArrow} aria-hidden>→</span>}
-                    </div>
-                  ))}
+                {/* Resumen accionable */}
+                <div className={s.reqSummary}>
+                  <strong className={s.heroValue}>{whole(requestsAgg.total)}</strong>
+                  <span className={s.heroUnit}>solicitud{requestsAgg.total === 1 ? '' : 'es'}</span>
+                  <span className={s.reqSummarySep}>· {requestAmountLabel({ count: requestsAgg.total, amount: totalAmount, unconvertedCount: requestsAgg.unconvertedCount })}</span>
+                  <span className={s.reqSummaryPaid}>· {whole(paidCount)} pagada{paidCount === 1 ? '' : 's'}</span>
                 </div>
 
                 {/* Alertas resaltadas */}
@@ -875,7 +897,7 @@ export default function DashboardPage() {
                     <thead><tr><th>Estatus</th><th className={s.right}>Solicitudes</th><th className={s.right}>Monto</th></tr></thead>
                     <tbody>
                       {requestsAgg.byStatus.map((r) => (
-                        <tr key={r.status}>
+                        <tr key={r.status} className={reqTone(r.status)}>
                           <td><span className={s.cellMain}>{r.label}</span></td>
                           <td className={s.right}>{whole(r.count)}</td>
                           <td className={s.right}>{requestAmountLabel(r)}</td>
@@ -896,10 +918,85 @@ export default function DashboardPage() {
                   {requestsAgg.unconvertedCount > 0 && <> {whole(requestsAgg.unconvertedCount)} solicitudes se incluyen en el conteo, pero su importe se excluye por moneda o tipo de cambio faltante o inválido.</>}
                 </div>
               </>
-            )}
+              )
+            })()}
           </section>
 
-          {/* ── Impuestos: desglose fiscal ── */}
+          {/* ── Efectivo / Incidencias (con tabs) — columna derecha ── */}
+          <div className={s.opsCol}>
+            {visibleTabs.length > 1 && <div className={s.tabsBlock}>
+              <div className={s.sectionTabs}>
+                {visibleTabs.map(([tab, label]) => (
+                  <button key={tab} type="button" className={`${s.sectionTab} ${selectedTab === tab ? s.active : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>
+                ))}
+              </div>
+            </div>}
+
+            {selectedTab === 'cash' && (
+              <section id="sec-cash" className={s.tableCard}>
+                <div className={s.panelHeader}>
+                  <div><h2>Efectivo y comprobaciones</h2><div className={s.panelSub}>{companyName} · Fondos activos al día de hoy, incluidos los de meses anteriores</div></div>
+                  <Link className={s.secondaryBtn} to="/efectivo">Ver módulo completo</Link>
+                </div>
+                {!cash ? <div className={s.tableMsg}>{activityEmpty}</div> : <>
+                  {/* Resumen accionable (mismo patrón que Solicitudes) */}
+                  <div className={s.reqSummary}>
+                    <strong className={s.heroValue}>{whole(cash.active)}</strong>
+                    <span className={s.heroUnit}>fondo{cash.active === 1 ? '' : 's'} activo{cash.active === 1 ? '' : 's'}</span>
+                    <span className={s.reqSummarySep}>· {money(cash.pendingAmount)} por comprobar</span>
+                    <span className={`${s.reqSummarySep} ${cash.overdue > 0 ? s.alertText : ''}`}>· {whole(cash.overdue)} vencido{cash.overdue === 1 ? '' : 's'}</span>
+                  </div>
+
+                  {/* Desglose por concepto (mismo patrón de tabla que Solicitudes) */}
+                  <div className={s.tableWrap}>
+                    <table className={s.table}>
+                      <thead><tr><th>Concepto</th><th className={s.right}>Cantidad</th><th className={s.right}>Monto</th></tr></thead>
+                      <tbody>
+                        <tr>
+                          <td><span className={s.cellMain}>Fondos activos</span></td>
+                          <td className={s.right}>{whole(cash.active)}</td>
+                          <td className={s.right}>{money(cash.assigned)}</td>
+                        </tr>
+                        <tr>
+                          <td><span className={s.cellMain}>Con saldo por comprobar</span></td>
+                          <td className={s.right}>{whole(cash.pending)}</td>
+                          <td className={s.right}>{money(cash.pendingAmount)}</td>
+                        </tr>
+                        <tr>
+                          <td><span className={s.cellMain}>En revisión</span></td>
+                          <td className={s.right}>{whole(cash.inReview)}</td>
+                          <td className={s.right}>—</td>
+                        </tr>
+                        <tr className={cash.overdue > 0 ? s.rowAttention : ''}>
+                          <td><span className={s.cellMain}>Vencidos</span></td>
+                          <td className={s.right}>{whole(cash.overdue)}</td>
+                          <td className={s.right}>—</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className={s.budgetOmitNote}>Entregado {money(cash.assigned)} · comprobado {money(cash.verified)}. Los fondos vencidos ya están incluidos en los pendientes; no se suman de nuevo.</p>
+                </>}
+              </section>
+            )}
+
+            {showIncidents && selectedTab === 'incidents' && (
+              <section className={s.tableCard}>
+                <div className={s.panelHeader}>
+                  <div><h2>Incidencias del mes</h2><div className={s.panelSub}>{companyName} · {monthLabel} · Por fecha de incidencia</div></div>
+                  <Link className={s.secondaryBtn} to="/incidencias">Ver módulo completo</Link>
+                </div>
+                {!inc ? <div className={s.tableMsg}>{activityEmpty}</div> : <div className={s.miniGrid}>
+                  {[['Abiertas', whole(inc.open)], ['Facturadas por cobrar', whole(inc.invoiced)], ['Cobradas', whole(inc.paid)], ['Total pendiente', whole(inc.pending)]].map(([l, v]) => (
+                    <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
+                  ))}
+                </div>}
+              </section>
+            )}
+          </div>
+          </div>
+
+          {/* ── Impuestos: desglose fiscal (full-width) ── */}
           <section id="sec-taxes" className={s.tableCard}>
             <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
               <div>
@@ -968,44 +1065,6 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {visibleTabs.length > 1 && <div className={s.tabsBlock}>
-            <div className={s.sectionTabs}>
-              {visibleTabs.map(([tab, label]) => (
-                <button key={tab} type="button" className={`${s.sectionTab} ${selectedTab === tab ? s.active : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>
-              ))}
-            </div>
-          </div>}
-
-          {selectedTab === 'cash' && (
-            <section className={s.tableCard}>
-              <div className={s.panelHeader}>
-                <div><h2>Efectivo y comprobaciones</h2><div className={s.panelSub}>{companyName} · Fondos activos al día de hoy, incluidos los de meses anteriores</div></div>
-                <Link className={s.secondaryBtn} to="/efectivo">Ver módulo completo</Link>
-              </div>
-              {!cash ? <div className={s.tableMsg}>{activityEmpty}</div> : <>
-                <div className={s.miniGrid}>
-                  {[['Fondos activos', whole(cash.active)], ['Con saldo por comprobar', whole(cash.pending)], ['En revisión', whole(cash.inReview)], ['De los pendientes, vencidos', whole(cash.overdue)], ['Monto entregado', money(cash.assigned)], ['Monto comprobado', money(cash.verified)], ['Monto por comprobar', money(cash.pendingAmount)]].map(([l, v]) => (
-                    <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                  ))}
-                </div>
-                <p className={s.budgetOmitNote}>Los fondos vencidos ya están incluidos en los pendientes; no se suman de nuevo.</p>
-              </>}
-            </section>
-          )}
-
-          {showIncidents && selectedTab === 'incidents' && (
-            <section className={s.tableCard}>
-              <div className={s.panelHeader}>
-                <div><h2>Incidencias del mes</h2><div className={s.panelSub}>{companyName} · {monthLabel} · Por fecha de incidencia</div></div>
-                <Link className={s.secondaryBtn} to="/incidencias">Ver módulo completo</Link>
-              </div>
-              {!inc ? <div className={s.tableMsg}>{activityEmpty}</div> : <div className={s.miniGrid}>
-                {[['Abiertas', whole(inc.open)], ['Facturadas por cobrar', whole(inc.invoiced)], ['Cobradas', whole(inc.paid)], ['Total pendiente', whole(inc.pending)]].map(([l, v]) => (
-                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                ))}
-              </div>}
-            </section>
-          )}
         </>
       )}
 
