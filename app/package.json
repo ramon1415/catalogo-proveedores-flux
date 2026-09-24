@@ -9,7 +9,12 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint . --max-warnings 152",
+    "lint:report": "eslint . --format json",
+    "format": "prettier --write",
+    "format:check": "prettier --check",
+    "format:check:tooling": "prettier --check eslint.config.mjs .prettierrc.json package.json QUALITY.md"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -23,11 +28,18 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.3.16",
+    "@eslint/js": "10.0.1",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "10.11.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "16.5.0",
+    "prettier": "3.9.9",
     "react-test-renderer": "18.3.1",
     "typescript": "^5.5.4",
+    "typescript-eslint": "8.70.1",
     "vite": "^5.4.6"
   }
 }

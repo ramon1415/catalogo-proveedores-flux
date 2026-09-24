@@ -82,7 +82,7 @@ export function parseObligationDocument(input: string | string[]): ObligationDoc
     // heading area; employee movements and salary/UMA dates are unrelated.
     for (let i = 0; i < lines.length; i++) if (/\bPERIODO\b/.test(lines[i])) {
       const window = lines.slice(i, i + 6).join('\n')
-      for (const m of window.matchAll(/(?<![\d/\-])(0?[1-9]|1[0-2])\s*-\s*(20\d{2}|21\d{2})(?!\d)/g)) {
+      for (const m of window.matchAll(/(?<![\d/-])(0?[1-9]|1[0-2])\s*-\s*(20\d{2}|21\d{2})(?!\d)/g)) {
         const p = period(Number(m[2]), Number(m[1]))
         if (p) periods.push(p.join('/'))
       }
