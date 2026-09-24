@@ -158,6 +158,7 @@ export async function prepareReceiptPdf(source: File, signal?: AbortSignal, opti
   }
   signal?.throwIfAborted()
   if (output.byteLength > MAX_BYTES) throw new Error('receipt_converted_size')
+  // eslint-disable-next-line no-control-regex -- Deliberately strip control characters from file names.
   const base = source.name.replace(/\.[^.]+$/, '').replace(/[\u0000-\u001f\u007f/\\]/g, '_').slice(0, 160) || 'comprobante'
   return { file: new File([output.slice().buffer as ArrayBuffer], `${base}.pdf`, { type: 'application/pdf' }), converted: true }
 }
