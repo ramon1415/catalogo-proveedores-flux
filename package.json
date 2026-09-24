@@ -12,6 +12,7 @@
     "@electric-sql/pglite": "0.3.16",
     "jspdf": "2.5.2",
     "jspdf-autotable": "3.8.4",
+    "playwright": "1.62.1",
     "unpdf": "1.4.0"
   }
 }

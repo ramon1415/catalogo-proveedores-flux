@@ -9,6 +9,7 @@ on:
       - 'scripts/qa/dashboard-operational.test.mjs'
       - 'scripts/qa/dashboard-global-budget.test.mjs'
       - 'scripts/qa/dashboard-budget-*.test.mjs'
+      - 'scripts/qa/dashboard-budget-mobile.browser.mjs'
       - 'supabase/migrations/*_dashboard_budget_movements.sql'
       - 'supabase/migrations/*_dashboard_global_budget_report.sql'
       - '.github/workflows/dashboard-operational.yml'
@@ -20,6 +21,7 @@ on:
       - 'scripts/qa/dashboard-operational.test.mjs'
       - 'scripts/qa/dashboard-global-budget.test.mjs'
       - 'scripts/qa/dashboard-budget-*.test.mjs'
+      - 'scripts/qa/dashboard-budget-mobile.browser.mjs'
       - 'supabase/migrations/*_dashboard_budget_movements.sql'
       - 'supabase/migrations/*_dashboard_global_budget_report.sql'
       - '.github/workflows/dashboard-operational.yml'
@@ -43,3 +45,26 @@ jobs:
       - run: node --test scripts/qa/dashboard-operational.test.mjs scripts/qa/dashboard-global-budget.test.mjs scripts/qa/dashboard-budget-*.test.mjs scripts/qa/pwa-*.test.mjs
       - run: npm --prefix app run build
       - run: node scripts/build-vercel-static.mjs
+
+  dashboard-mobile-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/qa/dashboard-budget-mobile.browser.mjs
+        env:
+          QA_SCREENSHOT_DIR: qa-artifacts/budget-mobile
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: budget-responsive-screenshots
+          path: qa-artifacts/budget-mobile
+          if-no-files-found: ignore
