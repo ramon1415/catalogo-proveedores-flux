@@ -314,6 +314,7 @@ async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname =
     '../../components/ui/Toast': { useToast: () => ({ showToast }) },
     '../../components/ui/Badge': { Badge: span },
     '../../components/ui/Skeleton': { TableSkeletonRows: noop, Skeleton: noop },
+    './BudgetAccordion': load(`${dashboardPath}BudgetAccordion.tsx`, { './logic': logic, './budgetMovements': { fetchBudgetMovements: async () => [], movementTotals: () => ({ used: 0, executed: 0 }) }, './Dashboard.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) }, './BudgetAccordion.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) }, 'react-router-dom': { Link: span } }),
     './api': api, './logic': { ...logic, currentPeriodKey: () => '2026-09' },
     './useOperationalDashboard': load(`${dashboardPath}useOperationalDashboard.ts`, { './api': api }),
     './charts': { ComboChart: props => React.createElement('figure', { 'data-chart': props }) }, './HistoryModal': { HistoryModal: noop }, './ExportModal': { ExportModal: noop },
@@ -396,7 +397,8 @@ test('page refresh reloads both sources; month/year controls stay aligned even w
     assert.equal(p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.value, '2025-03-01')
     assert.equal(p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).findAllByType('option').length, 13)
     assert.match(p.section('sec-requests'), /Marzo de 2025/)
-    assert.match(p.section('sec-requests'), /Pagadas1\$100/)
+    // Sin embudo: la tabla (única representación) muestra la fila Pagada con su conteo y monto.
+    assert.match(p.section('sec-requests'), /Pagada1\$100/)
     await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.onChange({ target: { value: 'all' } }))
     assert.match(text(p.renderer.toJSON()), /Resumen anual.*2025.*Cobros, incidencias y solicitudes por atender.*Marzo de 2025.*Efectivo muestra el saldo actual/)
     await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.onChange({ target: { value: '2025-10-01' } }))
@@ -484,7 +486,37 @@ test('activity distinguishes monthly income/incidents from current cash, without
   assert.equal(result.incomeExcluded, 2)
 })
 
+test('cash renders as a Solicitudes-style summary + table (concepto · cantidad · monto), not a hero', async () => {
+  // Fechas explícitas (pasado / futuro lejano) para que "vencidos" sea determinista sin importar la fecha de ejecución.
+  const p = await mountPage({ fetchActivity: async () => ({ legacyIncome: true, income: [], incidents: [], cash: [
+    cashRow({ due_date: '2000-01-01' }),                                     // activo · por comprobar · vencido
+    cashRow({ id: 'review', status: 'receipt_review', due_date: '2999-12-31' }), // activo · en revisión · NO vencido
+    cashRow({ id: 'closed', status: 'closed', assigned_amount: 1000 }),      // cerrado: excluido de fondos activos
+  ] }) })
+  try {
+    const section = p.section('sec-cash')
+    // Resumen accionable estilo Solicitudes (fondos activos · por comprobar · vencidos).
+    assert.match(section, /2fondos activos/)
+    assert.match(section, /\$160 por comprobar/)
+    assert.match(section, /1 vencido/)
+    // Tabla concepto · cantidad · monto (ya no el héroe cash).
+    assert.match(section, /ConceptoCantidadMonto/)
+    assert.match(section, /Fondos activos2\$200/)          // count active · entregado
+    assert.match(section, /Con saldo por comprobar2\$160/) // count pending · pendingAmount
+    assert.match(section, /En revisión1/)                  // inReview count
+    assert.match(section, /Vencidos1/)                     // overdue count, tono de atención
+    // Datos entregado/comprobado preservados en la nota; el héroe anterior desaparece.
+    assert.match(section, /Entregado \$200 · comprobado \$40/)
+    assert.doesNotMatch(section, /Monto comprobado/)       // etiqueta del héroe anterior
+    // Invariantes: importe por comprobar no se duplica y los vencidos no se doble-cuentan.
+    assert.equal(section.match(/\$160/g).length, 2)        // solo en resumen y en la fila "por comprobar"
+    assert.match(section, /no se suman de nuevo/)
+    assert.match(section, /Ver módulo completo/)
+  } finally { p.unmount() }
+})
+
 for (const { environment, op, fer } of companyEnvironments) test(`${environment}: activity API selects the income model per company and scopes all tenant data before pagination`, async () => {
+
   const calls = []
   const tables = {
     cash_funds: [cashRow({ company_id: op }), cashRow({ id: 'fer', company_id: fer }), cashRow({ company_id: fer, status: 'closed' })],
@@ -570,7 +602,9 @@ test('page partidas search handles accents, group names and no matches without c
     assert.match(section, /Administración/)
     assert.doesNotMatch(section, /Servicios QA/)
     assert.match(section, /1 de 2 partidas/)
-    assert.match(section, /Presupuestado\$2,000Consumo global\$1,400Saldo restante\$600/)
+    // Héroe rediseñado: usado de presupuestado + saldo restante (mismos importes canónicos).
+    assert.match(section, /\$1,400usado de \$2,000/)
+    assert.match(section, /Saldo restante\$600/)
     await act(async () => search.props.onChange({ target: { value: 'operacion servicios' } }))
     section = p.section('sec-budget')
     assert.match(section, /Servicios QA/)
@@ -596,7 +630,7 @@ test('top budget and chart use the same canonical amounts as detail, never the g
     assert.equal(chart.rightTitle, 'Ingresos')
     assert.deepEqual(chart.series.map(series => series.kind), ['bar', 'bar', 'line', 'line'])
     assert.deepEqual(chart.series.slice(0, 2).map(series => series.data.at(-1)), [1000, 700])
-    assert.match(p.section('sec-budget'), /Consumo global\$700/)
+    assert.match(p.section('sec-budget'), /\$700usado de \$1,000/)
   } finally { p.unmount() }
 })
 
