@@ -20,7 +20,7 @@ import {
   aggregateRequests, aggregateTaxes, requestAmountLabel,
 } from './logic'
 import type {
-  DashboardState, SectionTab, HistMapeo, BudgetPartida,
+  DashboardState, SectionTab, HistMapeo,
   RequestsAggregate, TaxesAggregate, RequestStage,
 } from './types'
 import type { HistMatrix } from './logic'
@@ -29,6 +29,7 @@ import { ComboChart } from './charts'
 import { HistoryModal } from './HistoryModal'
 import { ExportModal } from './ExportModal'
 import s from './Dashboard.module.css'
+import { BudgetAccordion } from './BudgetAccordion'
 
 // Colores de series (idénticos a Chart.js del vanilla).
 const C = {
@@ -803,7 +804,7 @@ export default function DashboardPage() {
                   <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
                 </div>
                 <p className={s.budgetOmitNote}>Se muestran primero las partidas con movimiento; las sobregiradas y cerca del límite van arriba. Las partidas sin uso quedan colapsadas al final. Los gastos sin presupuesto asignado también consumen el saldo global. {!!budgetCoverage?.historicalMonths && <>En histórico, “Por clasificar” = cuenta con mapeo ambiguo; “Sin partida” = cuenta sin mapeo. </>}La búsqueda no modifica los totales.</p>
-                <BudgetTable curated={curatedPartidas} noUse={noUsePartidas} search={budgetSearch} />
+                <BudgetAccordion key={`${companyId}:${reportYear}:${budgetPeriod}:${revision}:${budgetSearch}`} companyId={companyId!} year={reportYear} period={budgetPeriod} periodLabel={periodLabel} onRefresh={refreshSummary} curated={curatedPartidas} noUse={noUsePartidas} search={budgetSearch} />
                 {budgetAgg.omittedCount > 0 && (
                   <div className={s.budgetOmitNote}>
                     {budgetAgg.omittedCount} partida{budgetAgg.omittedCount === 1 ? '' : 's'} sin presupuesto ni uso omitida{budgetAgg.omittedCount === 1 ? '' : 's'} del desglose.
@@ -1113,89 +1114,4 @@ function HistCuentasPanel({ matrix, openGroups, onToggle }: { matrix: HistMatrix
 // Agrupa filas de grupo + sub-partidas sin envoltura DOM extra.
 function FragmentGroup({ children }: { open: boolean; children: ReactNode }) {
   return <>{children}</>
-}
-
-// ── Tabla compacta de partidas: curadas visibles, sin uso colapsadas ────────────
-function BudgetTable({ curated, noUse, search }: { curated: BudgetPartida[]; noUse: BudgetPartida[]; search: string }) {
-  const [showNoUse, setShowNoUse] = useState(false)
-  if (curated.length === 0 && noUse.length === 0) {
-    return <div className={s.tableMsg}>No hay partidas que coincidan con «{search}».</div>
-  }
-  return (
-    <div className={s.budgetTableWrap}>
-      <table className={s.budgetTable}>
-        <thead>
-          <tr>
-            <th scope="col">Partida</th>
-            <th scope="col" className={s.budgetNum}>Presupuestado</th>
-            <th scope="col" className={s.budgetNum}>Usado</th>
-            <th scope="col" className={s.budgetNum}>Disponible</th>
-            <th scope="col" className={s.budgetNum}>% utilizado</th>
-          </tr>
-        </thead>
-        <tbody>
-          {curated.map((p) => <BudgetTableRow key={p.categoryId} p={p} />)}
-          {curated.length === 0 && (
-            <tr><td colSpan={5} className={s.budgetTableMsg}>Ninguna partida con movimiento en este periodo.</td></tr>
-          )}
-          {noUse.length > 0 && (
-            <tr className={s.budgetToggleRow}>
-              <td colSpan={5}>
-                <button type="button" className={s.budgetToggleBtn} aria-expanded={showNoUse} onClick={() => setShowNoUse((v) => !v)}>
-                  <span aria-hidden="true" className={showNoUse ? s.budgetCaretOpen : s.budgetCaret}>▸</span>
-                  {showNoUse ? 'Ocultar' : '+'} {noUse.length} partida{noUse.length === 1 ? '' : 's'} sin uso
-                </button>
-              </td>
-            </tr>
-          )}
-          {showNoUse && noUse.map((p) => <BudgetTableRow key={p.categoryId} p={p} />)}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-// ── Fila de partida: esencial + mini-barra; expande al detalle completo ─────────
-function BudgetTableRow({ p }: { p: BudgetPartida }) {
-  const [open, setOpen] = useState(false)
-  const hasBudget = p.budgeted > 0
-  const excess = Math.max(0, p.used - p.budgeted)
-  const tone = p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''
-  // Mini-barra: llena al 100% si sobregirado o sin presupuesto; si no, al % usado.
-  const barW = !hasBudget ? 100 : p.over ? 100 : Math.max(0, Math.min(100, p.pctUsed))
-  const barTone = p.over ? s.barAlert : p.warn ? s.barWarn : !hasBudget ? s.barInfo : s.barOk
-  const pctText = !hasBudget ? 's/p' : Number.isFinite(p.pctUsed) ? pct(p.pctUsed) : '—'
-  return (
-    <>
-      <tr className={`${s.budgetTr} ${tone}`} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <th scope="row" className={s.budgetNameCell}>
-          <span aria-hidden="true" className={open ? s.budgetCaretOpen : s.budgetCaret}>▸</span>
-          <span className={s.budgetNameInner}>
-            <span className={s.budgetPartida}>{p.name}</span>
-            {p.group && p.group !== 'Sin grupo' && <span className={s.budgetGroup}>{p.group}</span>}
-            <span className={s.budgetMiniBar}><span className={`${s.budgetMiniFill} ${barTone}`} style={{ width: `${barW}%` }} /></span>
-          </span>
-        </th>
-        <td className={s.budgetNum}>{hasBudget ? money(p.budgeted) : <span className={s.budgetMuted}>Sin asignar</span>}</td>
-        <td className={s.budgetNum}>{money(p.used)}</td>
-        <td className={`${s.budgetNum} ${p.over ? s.alertText : ''}`}>{hasBudget ? money(p.available) : '—'}</td>
-        <td className={`${s.budgetNum} ${s.budgetPctCell} ${tone}`}>
-          {p.over && <span aria-hidden="true">↑ </span>}{pctText}
-        </td>
-      </tr>
-      {open && (
-        <tr className={s.budgetDetailRow}>
-          <td colSpan={5}>
-            <div className={s.budgetDetail}>
-              <span>Ejecutado (pagado)<strong>{money(p.executed)}</strong></span>
-              <span>Comprometido · pendiente de pago<strong>{money(p.committed)}</strong></span>
-              <span>Usado total<strong>{money(p.used)}</strong></span>
-              {hasBudget && <span>{p.over ? 'Excedente' : 'Disponible'}<strong className={p.over ? s.alertText : undefined}>{money(p.over ? excess : p.available)}</strong></span>}
-              {!hasBudget && <span className={s.budgetDetailNote}>Gasto sin presupuesto asignado; consume el saldo global pero no genera sobregiro de partida.</span>}
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  )
 }
