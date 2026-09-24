@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(new URL('../../app/package.json', import.meta.url))
 const { PGlite } = require('@electric-sql/pglite')
 const read = p => readFileSync(new URL('../../'+p, import.meta.url),'utf8')
-const migration = read('supabase/migrations/20260924175643_dashboard_budget_movements_operational.sql')
+const migration = read('supabase/migrations/20260924180021_dashboard_budget_movements_operational.sql')
 const company='11111111-1111-4111-8111-111111111111', other='22222222-2222-4222-8222-222222222222'
 async function fixture() {
  const db=new PGlite()
