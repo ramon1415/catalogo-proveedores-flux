@@ -5,6 +5,7 @@ import {
   requiresBankDetails,
   inferDestinationType,
   validateDestination,
+  validateProviderRfc,
   messageForSaveError,
 } from './logic'
 import { saveProvider, uploadProviderCsf, getCsfSignedUrl } from './api'
@@ -88,6 +89,7 @@ export function ProviderModal({
   const [f, setF] = useState<FormState>(EMPTY)
   const [csfFile, setCsfFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const readonly = mode === 'readonly'
   const isEdit = mode === 'edit'
@@ -162,9 +164,10 @@ export function ProviderModal({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (readonly || saving) return
+    setSaveError('')
 
     if (csfFile && !canUploadCsf) {
-      showToast('Sin permiso', 'Tu usuario no tiene permiso para cargar CSF de proveedores.', 'error')
+      setSaveError('Tu usuario no tiene permiso para cargar CSF de proveedores.')
       return
     }
 
@@ -191,7 +194,7 @@ export function ProviderModal({
     }
 
     if (!payload.alias || !payload.nombre_completo || !payload.metodo_pago) {
-      showToast('Datos incompletos', 'Alias, nombre completo y metodo de pago son obligatorios.', 'error')
+      setSaveError('Alias, nombre completo y método de pago son obligatorios.')
       return
     }
 
@@ -204,9 +207,9 @@ export function ProviderModal({
       payload.convenio_number = null
     }
 
-    const destErr = validateDestination(payload)
+    const destErr = validateProviderRfc(payload.rfc) || validateDestination(payload)
     if (destErr) {
-      showToast('Datos incompletos', destErr, 'error')
+      setSaveError(destErr)
       return
     }
 
@@ -232,7 +235,7 @@ export function ProviderModal({
       }
       onSaved()
     } catch (error) {
-      showToast(messageForSaveError(error), '', 'error')
+      setSaveError(messageForSaveError(error))
     } finally {
       setSaving(false)
     }
@@ -359,6 +362,7 @@ export function ProviderModal({
           </div>
         </div>
 
+        {saveError && <p className={s.saveError} role="alert">{saveError}</p>}
         <div className={s.modalActions}>
           <button type="button" className={s.secondaryBtn} onClick={onClose}>
             {readonly ? 'Cerrar' : 'Cancelar'}
