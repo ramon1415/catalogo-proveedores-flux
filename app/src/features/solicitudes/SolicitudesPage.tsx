@@ -237,7 +237,7 @@ export default function SolicitudesPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'todos' }) } }}>
           <span className={s.kpiLabel}>Solicitudes activas</span><span className={s.kpiValue}>{stats.total}</span>
         </div>
-        <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.approved ? s.active : ''}`} role="button" tabIndex={0}
+        <div className={`${s.kpi} ${s.paymentPending} ${s.clickable} ${cardActive.approved ? s.active : ''}`} role="button" tabIndex={0}
           onClick={() => setFilters({ status: 'approved', decision: 'todos' })}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'approved', decision: 'todos' }) } }}>
           <span className={s.kpiLabel}>Aprobadas por pagar</span><span className={s.kpiValue}>{stats.approved}</span>
@@ -247,7 +247,7 @@ export default function SolicitudesPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'excepciones' }) } }}>
           <span className={s.kpiLabel}>Excepciones por autorizar</span><span className={s.kpiValue}>{stats.blocked}</span>
         </div>
-        <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.paid ? s.active : ''}`} role="button" tabIndex={0}
+        <div className={`${s.kpi} ${s.paymentPaid} ${s.clickable} ${cardActive.paid ? s.active : ''}`} role="button" tabIndex={0}
           onClick={() => setFilters({ status: 'paid', decision: 'todos' })}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'paid', decision: 'todos' }) } }}>
           <span className={s.kpiLabel}>Pagadas</span><span className={s.kpiValue}>{stats.paid}</span>
