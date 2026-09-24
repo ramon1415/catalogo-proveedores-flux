@@ -8,10 +8,12 @@ on:
       - 'main'
     paths:
       - 'app/**'
+      - 'scripts/qa/solicitudes-approved-payment-status.test.mjs'
       - '.github/workflows/react-app-ci.yml'
   pull_request:
     paths:
       - 'app/**'
+      - 'scripts/qa/solicitudes-approved-payment-status.test.mjs'
       - '.github/workflows/react-app-ci.yml'
   workflow_dispatch:
 
@@ -46,6 +48,10 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Verify approved requests and payment status
+        working-directory: .
+        run: node --test scripts/qa/solicitudes-approved-payment-status.test.mjs scripts/qa/approval-history-downstream-statuses.test.mjs
 
       - name: Build
         run: npm run build

@@ -15,7 +15,8 @@ import {
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorAlias, formatCurrencyC,
-  formatMonth, statusBadge, budgetDecisionBadge, isExceptionRequest, isFinalDecisionStatus,
+  formatMonth, statusBadge, requestBudgetDecisionBadge, isApprovedAwaitingPayment,
+  hasAuthorizedBudgetException, isExceptionRequest, isFinalDecisionStatus,
   isTerminalStatus, decisionButtonsFor, isDecisionCommentRequired, decisionActionLabel,
   friendlyDecisionError, requestTypeLabel, paymentMethodLabel, paymentMethodVariant,
   extraordinaryStatusLabel, extraordinaryCategoryLabel, batchStatusLabel, reviewLabel,
@@ -226,9 +227,17 @@ export function DetailModal({
 
   const detailNotice = isPaid
     ? { title: 'Pagada', desc: 'Esta solicitud ya fue pagada.', variant: 'success' as const }
-    : exception
-      ? { title: 'Excepción presupuestal', desc: 'Requiere revisión por excepción presupuestal.', variant: 'warning' as const }
-      : { title: 'Presupuesto disponible', desc: 'Validada automáticamente con presupuesto disponible.', variant: 'info' as const }
+    : isApprovedAwaitingPayment(request)
+      ? {
+        title: statusBadge(request.status).label,
+        desc: hasAuthorizedBudgetException(request)
+          ? 'La excepción ya fue autorizada. La solicitud está pendiente de pago.'
+          : 'La aprobación ya está registrada. La solicitud está pendiente de pago.',
+        variant: 'success' as const,
+      }
+      : exception
+        ? { title: 'Excepción presupuestal', desc: 'Requiere revisión por excepción presupuestal.', variant: 'warning' as const }
+        : { title: 'Presupuesto disponible', desc: 'Validada automáticamente con presupuesto disponible.', variant: 'info' as const }
 
   const canEdit = canEditRequest && !isTerminalStatus(request.status)
 
@@ -400,7 +409,7 @@ export function DetailModal({
 
           <div className={s.dataSection}>
             <DataRow label="Estatus" value={<Badge variant={statusBadge(request.status).variant}>{statusBadge(request.status).label}</Badge>} />
-            <DataRow label="Validación presupuestal" value={(() => { const b = budgetDecisionBadge(request.budget_decision, request.budget_block_reason || ''); return <Badge variant={b.variant} title={b.title}>{b.label}</Badge> })()} />
+            <DataRow label="Validación presupuestal" value={(() => { const b = requestBudgetDecisionBadge(request); return <Badge variant={b.variant} title={b.title}>{b.label}</Badge> })()} />
             <DataRow label="Descripción" value={request.description || 'Sin descripción'} muted />
             {request.notes && <DataRow label="Notas" value={request.notes} muted />}
             {!isReembolso && (

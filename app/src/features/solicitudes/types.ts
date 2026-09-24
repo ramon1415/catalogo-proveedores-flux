@@ -342,7 +342,7 @@ export type CashFund = {
 export type StatusFilter =
   | 'todos' | 'activas' | 'submitted' | 'approved' | 'changes_requested'
   | 'finance_validation' | 'scheduled' | 'paid' | 'rejected' | 'cancelled'
-export type BudgetDecisionFilter = 'todos' | 'aprobable' | 'excepciones'
+export type BudgetDecisionFilter = 'todos' | 'aprobable' | 'excepciones' | 'excepciones_autorizadas'
 
 // Payload que consume create_payment_request + metadata Fase 2.
 export type RequestPayload = {

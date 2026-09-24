@@ -17,14 +17,14 @@ export const ACTIVE_REQUEST_STATUSES = [
 export const STATUS_FILTER_LABELS: Record<string, string> = {
   todos: 'Todas',
   activas: 'Activas',
-  submitted: 'Submitted',
-  approved: 'Approved',
-  changes_requested: 'Changes requested',
-  finance_validation: 'Finance validation',
-  scheduled: 'Scheduled',
+  submitted: 'Enviadas',
+  approved: 'Aprobadas por pagar',
+  changes_requested: 'Con corrección',
+  finance_validation: 'En proceso de pago',
+  scheduled: 'Pago programado',
   paid: 'Pagadas',
-  rejected: 'Rejected',
-  cancelled: 'Cancelled',
+  rejected: 'Rechazadas',
+  cancelled: 'Canceladas',
 }
 // Roles finanzas exactos (ADMIN_ROLES en config.js). Gobierna la opción Nómina
 // y el checkbox de ajuste extraordinario en la extensión Fase 2.
@@ -42,24 +42,44 @@ export function isExceptionRequest(request: PaymentRequest): boolean {
   return request?.budget_decision === 'bloqueado' || request?.is_extraordinary_adjustment === true
 }
 
+// Crear el archivo bancario avanza approved → finance_validation; no revoca
+// la aprobación. Conservar el estado operativo para la conciliación bancaria.
+export function isApprovedAwaitingPayment(request: PaymentRequest): boolean {
+  return ['approved', 'finance_validation', 'scheduled'].includes(request.status ?? '')
+}
+
+export function hasAuthorizedBudgetException(request: PaymentRequest): boolean {
+  return isExceptionRequest(request)
+    && (isApprovedAwaitingPayment(request) || request.status === 'paid')
+    && request.exception_status === 'approved'
+    && request.exception_action === 'exception_approved'
+}
+
+export function isPendingExceptionRequest(request: PaymentRequest): boolean {
+  return isActiveRequest(request) && isExceptionRequest(request)
+    && !isApprovedAwaitingPayment(request)
+}
+
 export function statusMatches(request: PaymentRequest, filter: string): boolean {
   if (filter === 'todos') return true
   if (filter === 'activas') return isActiveRequest(request)
+  if (filter === 'approved') return isApprovedAwaitingPayment(request)
   return request.status === filter
 }
 
 export function budgetDecisionMatches(request: PaymentRequest, filter: string): boolean {
   if (filter === 'todos') return true
-  if (filter === 'excepciones') return isExceptionRequest(request)
+  if (filter === 'excepciones') return isPendingExceptionRequest(request)
+  if (filter === 'excepciones_autorizadas') return hasAuthorizedBudgetException(request)
   return request.budget_decision === filter
 }
 
 export function isFinalDecisionStatus(status: string | null): boolean {
-  return ['approved', 'rejected', 'changes_requested', 'scheduled', 'paid', 'cancelled'].includes(status ?? '')
+  return ['approved', 'finance_validation', 'rejected', 'changes_requested', 'scheduled', 'paid', 'cancelled'].includes(status ?? '')
 }
 
 export function isTerminalStatus(status: string | null): boolean {
-  return ['paid', 'cancelled', 'rejected', 'approved', 'scheduled'].includes(status ?? '')
+  return ['paid', 'cancelled', 'rejected', 'approved', 'finance_validation', 'scheduled'].includes(status ?? '')
 }
 
 // ── Badges (label + variante del componente Badge) ─────────────────────────
@@ -70,12 +90,12 @@ export function statusBadge(status: string | null): BadgeDesc {
   const map: Record<string, BadgeDesc> = {
     submitted: { label: 'Enviada', variant: 'info' },
     approved: { label: 'Aprobada', variant: 'success' },
-    paid: { label: 'Pagado', variant: 'success' },
+    paid: { label: 'Pagada', variant: 'success' },
     rejected: { label: 'Rechazada', variant: 'danger' },
     cancelled: { label: 'Cancelada', variant: 'warning' },
     changes_requested: { label: 'Con corrección', variant: 'warning' },
-    finance_validation: { label: 'En revisión', variant: 'info' },
-    scheduled: { label: 'Programado', variant: 'info' },
+    finance_validation: { label: 'Aprobada · Pendiente de pago', variant: 'success', title: 'La aprobación se conserva mientras se procesa el pago bancario.' },
+    scheduled: { label: 'Aprobada · Pago programado', variant: 'success' },
   }
   return map[status ?? ''] ?? { label: status || 'Sin estatus', variant: 'neutral' }
 }
@@ -124,6 +144,18 @@ export function budgetDecisionBadge(decision: string | null, reason = ''): Badge
     return { label: budgetBlockReasonLabel(reason) || 'Excepción', variant: 'accent', title: budgetBlockReasonTooltip(reason) }
   }
   return { label: decision ? decision : 'Sin validar', variant: 'neutral' }
+}
+
+export function requestBudgetDecisionBadge(request: PaymentRequest): BadgeDesc {
+  if (hasAuthorizedBudgetException(request)) {
+    return {
+      label: 'Excepción autorizada', variant: 'success',
+      title: `La excepción ya fue autorizada. Motivo original: ${budgetBlockReasonLabel(request.budget_block_reason) || 'ajuste extraordinario'}.`,
+    }
+  }
+  const badge = budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '')
+  if (badge.label === 'Aprobable') return { ...badge, label: 'Con presupuesto' }
+  return badge
 }
 
 // ── Etiquetas de nombres (idénticas al vanilla) ────────────────────────────
