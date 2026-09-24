@@ -579,7 +579,11 @@ export async function loadPaidRequestsForExport(
     .select(
       'id,company_id,provider_id,proveedor_id,budget_category_id,cost_center_id,company_bank_account_id,' +
         'amount_requested,currency,exchange_rate,concept,description,request_number,paid_at,payment_method,' +
-        'cfdi_data,proveedores(rfc,nombre_completo,persona_tipo)',
+        'cfdi_data,proveedores(rfc,nombre_completo,persona_tipo),' +
+        // FASE 1 multi-partida: líneas de distribución embebidas (tabla hija).
+        // Si el pago no tiene líneas, PostgREST regresa [] y el export usa la
+        // única partida (budget_category_id) — comportamiento actual.
+        'payment_request_distributions(budget_category_id,cost_center_id,amount)',
     )
     .eq('company_id', companyId)
     .eq('status', 'paid')
