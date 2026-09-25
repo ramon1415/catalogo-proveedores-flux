@@ -11,6 +11,7 @@ import type {
 
 // ── Formateadores es-MX (idénticos a dashboard.js) ──────────────────────────
 const moneyFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })
+const preciseMoneyFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const numFmt = new Intl.NumberFormat('es-MX')
 const pctFmt = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
@@ -498,9 +499,9 @@ function requestExchangeRate(row: PaymentRequestRow): number | null {
   return currency && Number.isFinite(rate) && rate > 0 ? rate : null
 }
 
-export function requestAmountLabel(summary: RequestAmountSummary): string {
+export function requestAmountLabel(summary: RequestAmountSummary, precise = false): string {
   if (summary.count > 0 && summary.unconvertedCount === summary.count) return '—'
-  return `${money(summary.amount)}${summary.unconvertedCount > 0 ? ' (parcial)' : ''}`
+  return `${precise ? preciseMoneyFmt.format(summary.amount) : money(summary.amount)}${summary.unconvertedCount > 0 ? ' (parcial)' : ''}`
 }
 
 // Agrega payment_requests por etapa del embudo, alertas y desglose por status.
@@ -512,13 +513,23 @@ export function aggregateRequests(rows: PaymentRequestRow[], period: string): Re
   const scoped = scopeRequests(rows, period)
 
   const byStatusMap = new Map<string, RequestAmountSummary>()
+  // Same requests, period and conversion as the status table, including pending
+  // requests. Never reuse aggregateTaxes: that section has a different scope.
+  const breakdown = { base: 0, taxes: 0, withholdings: 0, difference: 0, total: 0 }
   for (const r of scoped) {
     const st = r.status || 'sin_estatus'
     const acc = byStatusMap.get(st) || { count: 0, amount: 0, unconvertedCount: 0 }
     acc.count += 1
     const rate = requestExchangeRate(r)
     if (rate === null) acc.unconvertedCount += 1
-    else acc.amount += r2(num(r.amount_requested) * rate)
+    else {
+      const total = r2(num(r.amount_requested) * rate)
+      acc.amount += total
+      breakdown.total += total
+      breakdown.base += r2(num(r.subtotal_amount ?? r.amount_requested) * rate)
+      breakdown.taxes += r2(num(r.tax_amount) * rate)
+      breakdown.withholdings += r2(num(r.withholding_amount) * rate)
+    }
     byStatusMap.set(st, acc)
   }
   const pick = (st: string) => byStatusMap.get(st) || { count: 0, amount: 0, unconvertedCount: 0 }
@@ -546,7 +557,14 @@ export function aggregateRequests(rows: PaymentRequestRow[], period: string): Re
     .sort((a, b) => b.amount - a.amount || b.count - a.count)
 
   const unconvertedCount = byStatus.reduce((sum, row) => sum + row.unconvertedCount, 0)
-  return { total: scoped.length, unconvertedCount, funnel, rejected, changesRequested, inReview, byStatus, months }
+  breakdown.base = r2(breakdown.base)
+  breakdown.taxes = r2(breakdown.taxes)
+  breakdown.withholdings = r2(breakdown.withholdings)
+  breakdown.total = r2(breakdown.total)
+  // Expose incomplete fiscal data / rounding instead of inventing taxes or
+  // forcing the subtotal to reconcile with the requested amount.
+  breakdown.difference = r2(breakdown.total - breakdown.base - breakdown.taxes + breakdown.withholdings)
+  return { total: scoped.length, breakdown, unconvertedCount, funnel, rejected, changesRequested, inReview, byStatus, months }
 }
 
 // ── Impuestos (desglose fiscal de payment_requests) ──────────────────────────

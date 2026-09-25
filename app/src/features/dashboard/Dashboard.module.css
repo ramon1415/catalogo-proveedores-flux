@@ -424,6 +424,14 @@
 .reqSummary .heroValue { font-size: 20px; }
 .reqSummarySep { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .reqSummaryPaid { font-size: 13px; color: var(--emerald); font-weight: 700; font-variant-numeric: tabular-nums; }
+.requestBreakdown { border-top: 1px solid var(--border); padding: 12px 16px 0; }
+.requestBreakdown h3 { margin: 0 0 8px; font-size: 14px; color: var(--text-1); }
+.requestBreakdown dl { margin: 0; }
+.requestBreakdown dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
+.requestBreakdown dt { min-width: 0; overflow-wrap: anywhere; }
+.requestBreakdown dd { margin: 0 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+.requestBreakdown dl > .requestBreakdownTotal { font-weight: 800; color: var(--text-1); }
+.requestBreakdown p { margin: 8px 0 0; font-size: 11px; color: var(--text-3); }
 .rowPaid .cellMain { color: var(--emerald); }
 .rowDanger .cellMain { color: var(--ruby); }
 .rowAttention .cellMain { color: var(--amber); }
