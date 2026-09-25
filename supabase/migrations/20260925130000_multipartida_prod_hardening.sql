@@ -206,6 +206,47 @@ $function$;
 revoke all on function public.verify_payment_request_distribution_budget(uuid) from public, anon;
 grant execute on function public.verify_payment_request_distribution_budget(uuid) to authenticated;
 
+-- ── Bloqueo 2 (corrección): lock + revalidación en función interna DEFINER ──
+-- Bajo RLS el rol de la app puede LEER budget_lines pero un `FOR UPDATE` bloquea
+-- 0 filas (no hay política de escritura), así que el lock del RPC (INVOKER) era
+-- un no-op. Se mueve a una función privada SECURITY DEFINER que sí adquiere el
+-- lock real (bypass RLS como owner) y revalida disponibilidad, con autorización
+-- por empresa. Es private (no expuesta por PostgREST) y valida membresía.
+create or replace function private.lock_and_check_obligation_budget(
+  p_company_id uuid, p_cost_center_id uuid, p_budget_category_id uuid,
+  p_budget_month date, p_amount numeric
+) returns void
+language plpgsql security definer
+set search_path to ''
+as $function$
+declare v_avail numeric; v_prof uuid := public.current_profile_id();
+begin
+  -- Autorización por empresa (defensa en profundidad; el RPC ya validó membresía).
+  if v_prof is null then raise exception 'not_authenticated'; end if;
+  if not public.has_active_company_membership(v_prof, p_company_id)
+     and not public.current_user_has_role(public.flux_sysadmin_roles()) then
+    raise exception 'company_authorization_required';
+  end if;
+  -- Lock REAL de la(s) budget_line(s) de la partida (definer => sin RLS).
+  perform 1 from public.budget_lines bl
+    join public.budget_versions bv on bv.id = bl.budget_version_id and bv.active
+   where bl.company_id = p_company_id and bl.cost_center_id = p_cost_center_id
+     and bl.budget_category_id = p_budget_category_id and bl.budget_month = p_budget_month
+   order by bl.id for update of bl;
+  if not found then raise exception 'OBLIGATION_BUDGET_LINE_REQUIRED'; end if;
+  -- Revalida disponibilidad bajo el lock (la solicitud aún no se insertó).
+  select b.available into v_avail from public.budget_availability b
+   where b.company_id = p_company_id and b.cost_center_id = p_cost_center_id
+     and b.budget_category_id = p_budget_category_id and b.budget_month = p_budget_month;
+  if v_avail is null or v_avail < p_amount then
+    raise exception using errcode = '40001',
+      message = 'El presupuesto cambió por otra solicitud. Actualiza y vuelve a revisar el monto.';
+  end if;
+end;
+$function$;
+revoke all on function private.lock_and_check_obligation_budget(uuid,uuid,uuid,date,numeric) from public, anon;
+grant execute on function private.lock_and_check_obligation_budget(uuid,uuid,uuid,date,numeric) to authenticated;
+
 -- ── Bloqueos 1b + 2: create_payment_request con hardening multi-partida ──
 -- Multi-partida: (a) fija budget_decision por agregado de líneas y no_presupuestal
 -- por línea (todas no_presupuestal => solicitud no_presupuestal); (b) señaliza a
@@ -332,20 +373,26 @@ begin
   if v_is_multi then
     v_dist_base := coalesce(p_subtotal_amount, p_amount_requested);
 
-    -- Concurrencia (bloqueo 2): bloquea FOR UPDATE, en orden determinista, las
-    -- budget_lines de TODAS las partidas del reparto con obligación compartida
-    -- habilitada, ANTES de leer disponibilidad y de insertar (la solicitud aún
-    -- no existe => la vista no se auto-cuenta). Serializa vs otras solicitudes.
-    perform 1 from public.budget_lines bl
-      join public.budget_versions bv on bv.id = bl.budget_version_id and bv.active
-    where bl.company_id = p_company_id and bl.budget_month = v_budget_month
-      and (bl.cost_center_id, bl.budget_category_id) in (
-        select coalesce(nullif(e->>'cost_center_id','')::uuid, p_cost_center_id), (e->>'budget_category_id')::uuid
-        from jsonb_array_elements(p_distributions) e
-        where exists (select 1 from public.payroll_obligation_settings s
-          where s.company_id = p_company_id and s.budget_category_id = (e->>'budget_category_id')::uuid and s.enabled)
-      )
-    order by bl.id for update of bl;
+    -- Concurrencia (bloqueo 2): por CADA partida del reparto con obligación
+    -- compartida, adquiere el lock REAL + revalida disponibilidad vía la función
+    -- interna DEFINER (bajo RLS el FOR UPDATE del rol de la app bloquea 0 filas).
+    -- Orden determinista por budget_category_id para evitar deadlocks. Se corre
+    -- ANTES de insertar (la solicitud aún no existe => la vista no se auto-cuenta).
+    for v_dist_elem in
+      select je.value from jsonb_array_elements(p_distributions) je
+      where exists (select 1 from public.payroll_obligation_settings s
+        where s.company_id = p_company_id
+          and s.budget_category_id = (je.value->>'budget_category_id')::uuid and s.enabled)
+      order by je.value->>'budget_category_id'
+    loop
+      perform private.lock_and_check_obligation_budget(
+        p_company_id,
+        coalesce(nullif(v_dist_elem->>'cost_center_id','')::uuid, p_cost_center_id),
+        (v_dist_elem->>'budget_category_id')::uuid,
+        v_budget_month,
+        round((v_dist_elem->>'amount')::numeric * v_exchange_rate, 2)
+      );
+    end loop;
 
     for v_dist_elem in select * from jsonb_array_elements(p_distributions) loop
       v_dist_cat := nullif(v_dist_elem->>'budget_category_id', '')::uuid;
