@@ -827,6 +827,7 @@ export default function DashboardPage() {
               // con lo accionable resaltado y una línea-resumen accionable arriba.
               const paidCount = requestsAgg.funnel.find((f) => f.key === 'pagadas')?.count ?? 0
               const totalAmount = requestsAgg.byStatus.reduce((a, r) => a + r.amount, 0)
+              const breakdownAmount = (amount: number) => requestAmountLabel({ count: requestsAgg.total, amount, unconvertedCount: requestsAgg.unconvertedCount }, true)
               const IN_PROGRESS = ['draft', 'submitted', 'pending_approval', 'changes_requested', 'finance_validation']
               const reqTone = (status: string): string =>
                 status === 'paid' ? s.rowPaid
@@ -882,6 +883,18 @@ export default function DashboardPage() {
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+                <div className={s.requestBreakdown}>
+                  <h3>Desglose del monto solicitado</h3>
+                  <dl>
+                    <div><dt>Base presupuestal</dt><dd>{breakdownAmount(requestsAgg.breakdown.base)}</dd></div>
+                    <div><dt>Impuestos registrados</dt><dd>{breakdownAmount(requestsAgg.breakdown.taxes)}</dd></div>
+                    {requestsAgg.breakdown.withholdings !== 0 && <div><dt>Retenciones (se restan)</dt><dd>{breakdownAmount(requestsAgg.breakdown.withholdings)}</dd></div>}
+                    {requestsAgg.breakdown.difference !== 0 && <div><dt>Diferencia de desglose</dt><dd>{breakdownAmount(requestsAgg.breakdown.difference)}</dd></div>}
+                    <div className={s.requestBreakdownTotal}><dt>Total con impuestos</dt><dd>{breakdownAmount(requestsAgg.breakdown.total)}</dd></div>
+                  </dl>
+                  <p>La base usa el subtotal cuando existe; de lo contrario, el importe total.</p>
+                  {requestsAgg.breakdown.difference !== 0 && <p>El desglose registrado no coincide con el total solicitado; incluye diferencias de captura o redondeo.</p>}
                 </div>
                 <div className={s.budgetOmitNote}>
                   Importes totales solicitados, con impuestos y solicitudes no presupuestales, convertidos a MXN con el tipo de cambio registrado. Por eso pueden diferir del uso presupuestal. En pagadas se muestra el importe solicitado.

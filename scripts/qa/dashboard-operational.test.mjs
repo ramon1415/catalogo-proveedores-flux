@@ -116,6 +116,41 @@ test('missing or invalid currency conversion preserves counts and marks amounts 
   assert.match(logic.requestAmountLabel(mixed.byStatus[0]), /200.*parcial/)
 })
 
+test('request breakdown reconciles gross, subtotal, taxes and withholding using the same period and statuses', () => {
+  const result = logic.aggregateRequests([
+    requestRow({ amount_requested: 110, subtotal_amount: 100, tax_amount: 16, withholding_amount: 6 }),
+    requestRow({ status: 'finance_validation', amount_requested: 58, subtotal_amount: 50, tax_amount: 8, currency: 'USD', exchange_rate: 20 }),
+    requestRow({ status: 'rejected', amount_requested: 70, subtotal_amount: null }),
+    requestRow({ amount_requested: 999, subtotal_amount: 800, currency: 'USD', exchange_rate: null }),
+    requestRow({ budget_month: '2026-05-01', amount_requested: 92986.76 }),
+  ], month)
+  assert.deepEqual(result.breakdown, { base: 1170, taxes: 176, withholdings: 6, difference: 0, total: 1340 })
+  assert.equal(result.unconvertedCount, 1)
+  assert.equal(result.breakdown.total, result.byStatus.reduce((sum, row) => sum + row.amount, 0))
+  assert.equal(logic.requestAmountLabel({ count: 4, unconvertedCount: 1, amount: result.breakdown.total }, true), '$1,340.00 (parcial)')
+  // Recorded tax without a subtotal must not be counted twice or silently reconciled.
+  assert.deepEqual(logic.aggregateRequests([requestRow({ amount_requested: 116, subtotal_amount: null, tax_amount: 16 })], month).breakdown,
+    { base: 116, taxes: 16, withholdings: 0, difference: -16, total: 116 })
+  assert.equal(logic.aggregateRequests([requestRow({ amount_requested: 16, subtotal_amount: 0, tax_amount: 16 })], month).breakdown.base, 0)
+})
+
+for (const company of ['operadora', 'fersana']) test(`${company}: requests display the approved cent-precise breakdown without changing the status table`, async () => {
+  const amounts = company === 'operadora'
+    ? { amount_requested: 399538.83, subtotal_amount: 365186.58, tax_amount: 34352.25 }
+    : { amount_requested: 1201079.48, subtotal_amount: 1162202.68, tax_amount: 38876.80 }
+  const p = await mountPage({ initialCompanyId: company, fetchRequests: async () => [requestRow(amounts)] })
+  try {
+    const section = p.section('sec-requests')
+    assert.match(section, /Desglose del monto solicitado/)
+    for (const [label, amount] of [['Base presupuestal', amounts.subtotal_amount], ['Impuestos registrados', amounts.tax_amount], ['Total con impuestos', amounts.amount_requested]]) {
+      assert.ok(section.includes(label + logic.requestAmountLabel({ count: 1, amount, unconvertedCount: 0 }, true)))
+    }
+    assert.doesNotMatch(section, /Retenciones \(se restan\)|Diferencia de desglose/)
+    assert.match(section, /Solicitudes — cómo van vs pagadas/)
+    assert.match(section, /La base usa el subtotal cuando existe/)
+  } finally { p.unmount() }
+})
+
 test('fiscal summary includes only approved, scheduled and paid requests, converts taxes and exposes missing detail/rates', () => {
   const excluded = ['draft', 'submitted', 'pending_approval', 'finance_validation', 'changes_requested', 'rejected', 'cancelled', null]
     .map(status => requestRow({ status, tax_amount: 999, withholding_amount: 999 }))
