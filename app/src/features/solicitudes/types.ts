@@ -380,6 +380,7 @@ export type RequestPayload = {
   beneficiary_profile_id: string | null
   // Señalización opcional; en reembolso siempre viaja false.
   partida_unsure: boolean
+  distributions?: { budget_category_id: string; cost_center_id: string | null; amount: number }[] | null
 }
 
 export type EditPayload = {

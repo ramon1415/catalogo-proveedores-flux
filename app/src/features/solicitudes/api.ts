@@ -238,6 +238,7 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
     p_beneficiary_profile_id: payload.beneficiary_profile_id,
     p_request_type: payload.request_type,
     p_partida_unsure: payload.partida_unsure,
+    p_distributions: payload.distributions?.length ? payload.distributions : null,
   })
   if (error) throw error
   return data
@@ -271,6 +272,7 @@ export async function createPaymentRequestWithDocument(
     p_request_type: payload.request_type,
     p_invoice_storage_path: invoiceStoragePath,
     p_partida_unsure: payload.partida_unsure,
+    p_distributions: payload.distributions?.length ? payload.distributions : null,
   })
   if (error) throw error
   return data

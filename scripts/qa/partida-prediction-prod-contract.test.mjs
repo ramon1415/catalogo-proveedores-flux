@@ -18,7 +18,7 @@ test('requester prediction is optional, availability-filtered and editable', () 
   assert.match(request, /availablePredictionCandidates/)
   assert.match(request, /Partida no disponible/)
   assert.match(request, /No estoy seguro de la partida/)
-  assert.match(request, /partida_unsure: isReembolso \|\| isSinPartidaRequest \? false : partidaUnsure/)
+  assert.match(request, /partida_unsure: isReembolso \|\| isSinPartidaRequest \|\| useMultiPartida \? false : partidaUnsure/)
 })
 
 test('current PROD atomic reimbursement/document paths remain present', () => {

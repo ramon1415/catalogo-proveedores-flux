@@ -12,9 +12,10 @@ import {
   updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, fetchPartidaPrediction, getSinPartidaApprover,
 } from './api'
+import { emptyDistributionLine, distributionLinesTotal, dominantDistributionCategory, validateDistributionLines, distributionBudgetExceedances, toDistributionPayload, type DistributionLine } from './multipartida'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
-  budgetCategoryAvailabilityLabel, sortAvailabilityRows,
+  budgetCategoryAvailabilityLabel, sortAvailabilityRows, getAvailableAmount,
   monthInputToDate, formatCurrencyC, formatMonth, validateReceiptFile,
   candidateMatchesSelection, validateRequestPayload, normalizeRequestType,
   normalizePaymentMethod, requestTypeLabel, paymentMethodLabel, isApproverStaleError,
@@ -104,6 +105,8 @@ export function RequestModal({
   const [prediction, setPrediction] = useState<PartidaPrediction | null>(null)
   const categoryTouched = useRef(false)
   const [partidaUnsure, setPartidaUnsure] = useState(false)
+  const [multiPartida, setMultiPartida] = useState(false)
+  const [distLines, setDistLines] = useState<DistributionLine[]>([emptyDistributionLine()])
   const [proveedorId, setProveedorId] = useState('')
   const [providerSearch, setProviderSearch] = useState('')
   const [cieReference, setCieReference] = useState('')
@@ -220,7 +223,9 @@ export function RequestModal({
   const sinPartidaId = budgetCategories.find(isSinPartida)?.id ?? ''
   const reembolsoTotals = useMemo(() => reimbursementTotals(items, sinPartidaId), [items, sinPartidaId])
   const effectiveAmount = isReembolso ? String(reembolsoTotals.total || '') : amount
-  const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : budgetCategoryId
+  const useMultiPartida = !isReembolso && !isConvenio && multiPartida
+  const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : useMultiPartida ? dominantDistributionCategory(distLines) : budgetCategoryId
+  const distributionBase = numberValue(subtotal !== '' ? subtotal : amount)
   const isSinPartidaRequest = Boolean(sinPartidaId && effectiveCategoryId === sinPartidaId)
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
@@ -248,6 +253,19 @@ export function RequestModal({
 
   const availabilityForCategory = (id: string | null) => budgetRows.find((r) => r.budget_category_id === id) || null
   const categoryById = (id: string) => budgetCategories.find((c) => c.id === id) || null
+  const distExceedances = useMultiPartida ? distributionBudgetExceedances(distLines, id => {
+    const row = availabilityForCategory(id)
+    if (!row) return null
+    return { available: getAvailableAmount(row) / (currency === 'MXN' ? 1 : numberValue(exchangeRate) || 1), noPresupuestal: categoryById(id)?.no_presupuestal === true || row.no_presupuestal === true }
+  }) : []
+  const distExceededSet = new Set(distExceedances.map(e => e.index))
+  function updateDistLine(key: string, patch: Partial<DistributionLine>) {
+    setDistLines(prev => prev.map(line => line.key === key ? { ...line, ...patch } : line))
+  }
+  function addDistLine() { setDistLines(prev => [...prev, emptyDistributionLine()]) }
+  function removeDistLine(key: string) { setDistLines(prev => prev.length > 1 ? prev.filter(line => line.key !== key) : prev) }
+  useEffect(() => { setDistLines([emptyDistributionLine()]); setMultiPartida(false) }, [companyId, costCenterId, budgetMonth, requestType])
+
 
   const filteredCategoryRows = useMemo(() => {
     // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
@@ -584,7 +602,8 @@ export function RequestModal({
         : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
       invoice_uuid: null,
       // Reembolsos clasifican por renglón: la bandera global siempre es false.
-      partida_unsure: isReembolso || isSinPartidaRequest ? false : partidaUnsure,
+      partida_unsure: isReembolso || isSinPartidaRequest || useMultiPartida ? false : partidaUnsure,
+      distributions: useMultiPartida ? toDistributionPayload(distLines, costCenterId || null) : null,
     }
   }
 
@@ -613,6 +632,10 @@ export function RequestModal({
       if (itemsValidation) { showToast('Revisa el desglose', itemsValidation, 'warning'); return }
     }
 
+    if (useMultiPartida) {
+      const issue = validateDistributionLines(distLines, distributionBase)
+      if (issue) { showToast('Revisa la distribución por partida', issue, 'warning'); return }
+    }
     const payload = collectPayload()
     if (isConvenio) {
       const error = convenioDataError(proveedor, cieReference, cieConcept)
@@ -708,6 +731,7 @@ export function RequestModal({
 
   function resetForAnother() {
     setSuccess(null)
+    setMultiPartida(false); setDistLines([emptyDistributionLine()])
     setRequestType('provider_payment'); setPaymentMethod('transfer')
     setCieReference(''); setCieConcept('')
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
@@ -898,10 +922,17 @@ export function RequestModal({
                       </label>
                       {/* En reembolso la partida se elige por renglón; la de la
                           solicitud sale del renglón de mayor monto. */}
-                      <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Partida presupuestal *
+                      {!isReembolso && !isConvenio && !isSinPartidaRequest && (
+                      <label className={`${s.checkboxCard} ${s.fullRow}`}>
+                        <input type="checkbox" checked={multiPartida} disabled={categoryDisabled}
+                          onChange={e => setMultiPartida(e.target.checked)} />
+                        Repartir el gasto en varias partidas
+                      </label>
+                    )}
+                    <label className={`${s.fullRow} ${isReembolso || useMultiPartida ? s.hidden : ''}`}>Partida presupuestal *
                         <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
                           value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
-                        <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => { categoryTouched.current = true; setBudgetCategoryId(e.target.value) }} required={!isReembolso}>
+                        <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => { categoryTouched.current = true; setBudgetCategoryId(e.target.value) }} required={!isReembolso && !useMultiPartida}>
                           <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
                           {filteredCategoryRows.map((r) => (
                             <option key={r.budget_category_id} value={r.budget_category_id!}>
@@ -929,7 +960,54 @@ export function RequestModal({
                           <div className={s.fieldHint}>El historial de este proveedor tiene partidas que no están disponibles para la combinación seleccionada.</div>
                         )}
                       </label>
-                      {!isSinPartidaRequest && (
+                    {/* FASE 2 · editor de distribución por partida. */}
+                    {useMultiPartida && (
+                      <div className={s.fullRow}>
+                        <div className={s.fieldHint} style={{ marginBottom: 6 }}>
+                          Reparte la base del gasto ({formatCurrencyC(distributionBase, currency)}, subtotal sin IVA si lo capturaste) entre las partidas. La suma debe cuadrar con la base.
+                        </div>
+                        {distLines.map((line, index) => {
+                          const exceeded = distExceededSet.has(index)
+                          const lineRow = availabilityForCategory(line.budgetCategoryId)
+                          return (
+                            <div key={line.key} style={{ display: 'grid', gridTemplateColumns: '1fr 140px auto', gap: 8, alignItems: 'start', marginBottom: 8 }}>
+                              <select aria-label={`Partida ${index + 1}`} className={s.formControl} value={line.budgetCategoryId} disabled={categoryDisabled}
+                                onChange={(e) => updateDistLine(line.key, { budgetCategoryId: e.target.value })} required>
+                                <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida'}</option>
+                                {filteredCategoryRows
+                                  .filter((r) => r.budget_category_id !== sinPartidaId)
+                                  .map((r) => (
+                                    <option key={r.budget_category_id} value={r.budget_category_id!}>
+                                      {budgetCategoryAvailabilityLabel(categoryById(r.budget_category_id!), r)}
+                                    </option>
+                                  ))}
+                              </select>
+                              <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
+                                aria-label={`Monto partida ${index + 1}`} value={line.amount} disabled={categoryDisabled}
+                                onChange={(e) => updateDistLine(line.key, { amount: e.target.value })}
+                                style={exceeded ? { borderColor: 'var(--ruby)' } : undefined} />
+                              <button type="button" className={s.secondaryBtn} onClick={() => removeDistLine(line.key)}
+                                disabled={distLines.length <= 1} aria-label={`Quitar partida ${index + 1}`}>Quitar</button>
+                              {exceeded && lineRow && (
+                                <div className={s.fieldHint} style={{ gridColumn: '1 / -1', color: 'var(--ruby)' }}>
+                                  Excede el disponible de la partida ({formatCurrencyC(getAvailableAmount(lineRow) / (currency === 'MXN' ? 1 : numberValue(exchangeRate) || 1), currency)}). Se enviará como excepción presupuestal.
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <button type="button" className={s.secondaryBtn} onClick={addDistLine} disabled={categoryDisabled}>+ Agregar partida</button>
+                          <span className={s.fieldHint} style={{
+                            color: Math.abs(distributionLinesTotal(distLines) - distributionBase) > 0.01 ? 'var(--ruby)' : 'var(--jade, inherit)',
+                          }}>
+                            Suma {formatCurrencyC(distributionLinesTotal(distLines), currency)} / base {formatCurrencyC(distributionBase, currency)}
+                          </span>
+                        </div>
+                        <div className={`${s.fieldHint} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>{categoryHelp.text}</div>
+                      </div>
+                    )}
+                      {!isSinPartidaRequest && !useMultiPartida && (
                       <label className={`${s.checkboxCard} ${s.fullRow}`}>
                         <input type="checkbox" checked={partidaUnsure} onChange={(e) => setPartidaUnsure(e.target.checked)} />
                         No estoy seguro de la partida
