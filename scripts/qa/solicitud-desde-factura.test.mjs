@@ -35,6 +35,7 @@ function load(file, imports = {}, domParser) {
 const format = load('app/src/lib/format.ts')
 const logic = load(feature + 'logic.ts', { '../../lib/format': format })
 const cfdiModule = load(feature + 'cfdi.ts')
+const multipartida = load(feature + 'multipartida.ts')
 const companies = [
   { id: 'a', name: 'Empresa A', rfc: 'AAA010101AAA' },
   { id: 'b', name: 'Empresa B', rfc: 'BBB010101BBB' },
@@ -64,6 +65,7 @@ async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = tr
   const QuickProviderModal = () => null
   const { RequestModal } = load(feature + 'RequestModal.tsx', {
     './api': api, './logic': allowCreation ? { ...logic, validateRequestPayload: () => '' } : logic,
+    './multipartida': multipartida,
     '../../lib/format': format,
     './cfdi': { ...cfdiModule, parseCfdiFile: async (f) => f.cfdi },
     '../../lib/contpaq/cfdiBrowser': { parseCfdiXml: (xml) => ({ source: xml }) },
