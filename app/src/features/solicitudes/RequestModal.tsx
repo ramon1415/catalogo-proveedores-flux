@@ -7,11 +7,11 @@ import {
   updateFase2Metadata, uploadReceipt, linkInvoicePath, insertRequestAttachments, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems, loadActiveProjects, setRequestProject,
-  fetchPartidaPrediction, getSinPartidaApprover, insertPaymentRequestDistributions,
+  fetchPartidaPrediction, getSinPartidaApprover,
 } from './api'
 import {
   emptyDistributionLine, distributionLinesTotal, dominantDistributionCategory,
-  validateDistributionLines, distributionBudgetExceedances, toDistributionInserts,
+  validateDistributionLines, distributionBudgetExceedances, toDistributionPayload,
   type DistributionLine, type PartidaBudgetInfo,
 } from './multipartida'
 import {
@@ -780,6 +780,9 @@ const availablePredictionCandidates = useMemo(
       // El reembolso clasifica por renglón y la multi-partida reparte explícito:
       // la bandera "no estoy seguro" (global, una sola partida) no aplica en esos.
       partida_unsure: isReembolso || isSinPartidaRequest || useMultiPartida ? false : partidaUnsure,
+      // Multi-partida: las líneas viajan en el RPC y se validan/insertan en la
+      // misma transacción. Sin modo multi-partida => null (una sola partida).
+      distributions: useMultiPartida ? toDistributionPayload(distLines, costCenterId || null) : null,
     }
   }
 
@@ -865,15 +868,9 @@ const availablePredictionCandidates = useMemo(
         if (projectWarning) showToast('Proyecto no etiquetado', projectWarning, 'warning')
       }
 
-      // FASE 2 · líneas de distribución multi-partida. Se guardan DESPUÉS de crear
-      // la solicitud (el RPC no las conoce) y solo cuando el modo está activo; su
-      // presencia activa el reparto en el export. No bloqueante: si falla, el
-      // export cae en la partida principal (comportamiento actual).
-      if (useMultiPartida) {
-        const distInserts = toDistributionInserts(distLines, requestId, payload.cost_center_id)
-        const distWarning = await insertPaymentRequestDistributions(distInserts)
-        if (distWarning) showToast('Distribución no guardada', distWarning, 'warning')
-      }
+      // FASE 2/3 · las líneas de distribución multi-partida viajan en el RPC
+      // (payload.distributions) y se validan por partida + insertan en la MISMA
+      // transacción que la solicitud. Ya no hay insert posterior no-bloqueante.
 
       // Metadata local de efectivo/cheque (persistCashMetadataIfNeeded).
       if (['cash', 'check'].includes(payload.payment_method)) {

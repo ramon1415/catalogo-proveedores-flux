@@ -18,6 +18,7 @@ import {
   validateDistributionLines,
   distributionBudgetExceedances,
   toDistributionInserts,
+  toDistributionPayload,
 } from '../../app/src/features/solicitudes/multipartida.ts'
 
 function line(budgetCategoryId, amount) {
@@ -100,4 +101,25 @@ test('toDistributionInserts arma las filas ligadas al request y centro de costo'
     amount: 6000,
   })
   assert.equal(rows[1].amount, 10461.4)
+})
+
+// ── payload transaccional (RPC create_payment_request / p_distributions) ──────
+test('toDistributionPayload arma las líneas SIN payment_request_id (las asigna el RPC)', () => {
+  const lines = [line('cat-A', 6000), line('cat-B', 10461.4), line('', 0)]
+  const rows = toDistributionPayload(lines, 'cc-1')
+  assert.equal(rows.length, 2) // descarta la línea vacía
+  assert.deepEqual(rows[0], {
+    budget_category_id: 'cat-A',
+    cost_center_id: 'cc-1',
+    amount: 6000,
+  })
+  assert.equal(rows[1].budget_category_id, 'cat-B')
+  assert.equal(rows[1].amount, 10461.4)
+  // No debe filtrar payment_request_id: el RPC lo asigna al insertar.
+  assert.ok(!('payment_request_id' in rows[0]))
+})
+
+test('toDistributionPayload propaga cost_center_id nulo', () => {
+  const rows = toDistributionPayload([line('cat-A', 100)], null)
+  assert.equal(rows[0].cost_center_id, null)
 })

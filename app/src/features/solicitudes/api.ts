@@ -220,6 +220,11 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
     p_beneficiary_profile_id: payload.beneficiary_profile_id,
     p_request_type: payload.request_type,
     p_partida_unsure: payload.partida_unsure,
+    // Multi-partida: cuando hay líneas, el RPC valida cada una contra el
+    // disponible de SU partida y las inserta en la MISMA transacción. Sin
+    // líneas se envía null y el flujo es el de una sola partida.
+    p_distributions:
+      payload.distributions && payload.distributions.length ? payload.distributions : null,
   })
   if (error) throw error
   return data
