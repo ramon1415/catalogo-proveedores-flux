@@ -94,4 +94,3 @@ export const rpc = (db, lines) => db.query(`select public.create_payment_request
   p_budget_month=>'2026-09-01',p_amount_requested=>$1,p_approver_id=>'${approver}',p_distributions=>$2::jsonb) as result`,
   [lines.reduce((n,l)=>n+l.amount,0),JSON.stringify(lines)])
 export const line=(category,amount)=>({budget_category_id:category,cost_center_id:cc,amount})
-
