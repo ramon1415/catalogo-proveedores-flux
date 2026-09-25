@@ -349,21 +349,11 @@ export async function loadBeneficiaryProfileId(requestId: string): Promise<strin
   return (data as { beneficiary_profile_id: string | null }).beneficiary_profile_id ?? null
 }
 
-// ── Distribución multi-partida (FASE 2) ────────────────────────────────────
-// Se insertan DESPUÉS de create_payment_request: el RPC no conoce estas líneas,
-// y la solicitud no debe perderse si el insert falla. La presencia de líneas es
-// lo que activa el reparto multi-partida en el export (FASE 1). No bloqueante:
-// devuelve un warning en lugar de lanzar (misma política que reembolsos/proyecto).
-export async function insertPaymentRequestDistributions(rows: DistributionInsert[]): Promise<string> {
-  if (!rows.length) return ''
-  try {
-    const { error } = await supabase.from('payment_request_distributions').insert(rows)
-    if (!error) return ''
-    return 'La solicitud se creó, pero la distribución por partidas no pudo guardarse. El export usará la partida principal.'
-  } catch {
-    return 'La solicitud se creó, pero la distribución por partidas no pudo guardarse. El export usará la partida principal.'
-  }
-}
+// ── Distribución multi-partida ─────────────────────────────────────────────
+// Las líneas de distribución se transmiten AHORA en el RPC create_payment_request
+// (payload.distributions) y se insertan en la MISMA transacción que la solicitud
+// (ver create_payment_request / p_distributions). Se eliminó el insert posterior
+// no-atómico para que no exista una vía que pierda o desincronice el reparto.
 
 // ── Alta rápida de proveedor (fase2 quick provider) ───────────────────────
 export async function quickCreateProvider(payload: Record<string, unknown>): Promise<Proveedor> {
