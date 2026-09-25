@@ -18,6 +18,7 @@ function load(path, imports = {}, globals = {}) {
   const dependency = (name) => {
     if (Object.hasOwn(imports, name)) return imports[name]
     if (name === '../../lib/requestClassification') return load('app/src/lib/requestClassification.ts')
+    if (name === './multipartida') return load(feature + 'multipartida.ts')
     if (name.startsWith('react')) return require(name)
     if (name.endsWith('.css')) return new Proxy({}, { get: (_, key) => String(key) })
     if (name === './ConvenioReceiptUpload') return { ConvenioReceiptUpload: () => null }
@@ -48,7 +49,7 @@ async function mount(companyId, options = {}) {
   let timerId = 0
   const result = { payment_request_id: 'created', request_number: 'QA-ONLY' }
   const api = {
-    loadBudgetAvailability: async () => [availability],
+    loadBudgetAvailability: async () => [availability, {...availability, budget_category_id: 'category2'}],
     listApproverOptions: async () => [{ profile_id: 'approver', source: 'approval_rules', full_name: 'Aprobador QA' }],
     fetchPartidaPrediction: async () => null,
     createPaymentRequest: async payload => { calls.push(['create', payload]); return result },
@@ -89,7 +90,7 @@ async function mount(companyId, options = {}) {
     clearTimeout: id => timers.delete(id),
   } })[component]
   const props = {
-    companies, costCenters: [center], budgetCategories: [category], proveedores: [provider], profile,
+    companies, costCenters: [center], budgetCategories: [category, {id: 'category2', name: 'Materiales'}], proveedores: [provider], profile,
     requester: originalRequester,
     canApprove: false, showNomina: false, onProviderCreated() {}, onClose() {}, onCreated() {}, onSaved() {},
     request: { id: 'existing', requested_by: originalRequester.id, company_id: companyId, cost_center_id: center.id, budget_category_id: category.id,
@@ -163,3 +164,20 @@ test('editar un documento existente sin reemplazarlo conserva su vínculo', asyn
   assert.ok(!Object.hasOwn(h.calls[0][2], 'invoice_storage_path'))
   h.close()
 })
+
+for (const withDocument of [false, true]) {
+ test(`multipartida ${withDocument ? 'con' : 'sin'} comprobante transmite ambas líneas en una sola creación`,async()=>{
+  const h=await mount('operadora')
+  await act(async()=>{labelControl(h.view,'Repartir el gasto','input').props.onChange({target:{checked:true}})})
+  await act(async()=>{h.view.root.findAllByType('button').find(n=>text(n)==='+ Agregar partida').props.onClick()})
+  const selectors=()=>h.view.root.findAllByType('select').filter(n=>n.props['aria-label']?.startsWith('Partida '))
+  const amounts=()=>h.view.root.findAllByProps({placeholder:'0.00'}).filter(n=>n.props['aria-label']?.startsWith('Monto partida '))
+  await act(async()=>{selectors()[0].props.onChange({target:{value:'category'}});amounts()[0].props.onChange({target:{value:'60'}})})
+  await act(async()=>{selectors()[1].props.onChange({target:{value:'category2'}});amounts()[1].props.onChange({target:{value:'40'}})})
+  if(withDocument)await h.attach()
+  await h.submit()
+  assert.deepEqual(h.calls.map(c=>c[0]),withDocument?['upload','createWithDocument']:['create'],JSON.stringify(h.toasts))
+  assert.deepEqual(h.calls.at(-1)[1].distributions,[{budget_category_id:'category',cost_center_id:'center',amount:60},{budget_category_id:'category2',cost_center_id:'center',amount:40}])
+  h.close()
+ })
+}
