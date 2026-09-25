@@ -228,6 +228,7 @@ export type RequestStatusLine = RequestAmountSummary & { status: string; label: 
 
 export type RequestsAggregate = {
   total: number
+  breakdown: { base: number; taxes: number; withholdings: number; difference: number; total: number }
   unconvertedCount: number // solicitudes contadas cuyo importe no se pudo convertir a MXN
   funnel: RequestStage[]                        // en curso → aprobadas → programadas → pagadas
   rejected: RequestAmountSummary   // alerta roja
