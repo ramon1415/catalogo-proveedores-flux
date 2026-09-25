@@ -8,7 +8,7 @@ Captura de solicitud normal con varias partidas, con o sin comprobante. El clien
 
 ## Orden de base de datos
 
-Aplicar las siete migraciones del paquete en este orden, dentro de una única transacción de release (quitar los BEGIN/COMMIT individuales al agruparlas):
+El archivo activo `20260925173828_multipartida_atomic_prod_release.sql` consolida estas siete fuentes en el mismo orden y una sola transacción. Los originales están en `scripts/qa/fixtures/multipartida-release/` para trazabilidad y regresiones:
 
 1. 20260924181500_payment_request_distributions_multipartida
 2. 20260924190000_payment_request_distribution_budget_validation
@@ -18,7 +18,7 @@ Aplicar las siete migraciones del paquete en este orden, dentro de una única tr
 6. 20260925160000_request_with_document_distributions
 7. 20260925171716_multipartida_preserve_rpc_permissions
 
-La séptima conserva los permisos actuales de PROD: authenticated y service_role pueden ejecutar; PUBLIC y anon no. Los argumentos opcionales mantienen las llamadas del cliente anterior durante la transición. Aplicar backend antes de publicar el cliente. Registrar estas versiones con el mecanismo de migración del despliegue; no reparar ni reescribir el desfase histórico de migraciones como parte de este paquete.
+La séptima conserva los permisos actuales de PROD: authenticated y service_role pueden ejecutar; PUBLIC y anon no. Los argumentos opcionales mantienen las llamadas del cliente anterior durante la transición. Aplicar backend antes de publicar el cliente. Se registra únicamente la versión de la migración consolidada, cuyo nombre se alinea con la versión generada por el servicio. No se reparan ni reescriben versiones históricas. La vista restaura explícitamente security_invoker=true; el paquete aborta si cambian las filas de disponibilidad existentes, las firmas o los permisos.
 
 Antes de aplicar: respaldos disponibles, comparar el esquema vigente, verificar firmas/dependencias y guardar agregados de disponibilidad. Después: agregados sin cambio para las solicitudes existentes sin reparto, firmas core22/document22/document23, permisos, asesores y comprobación de aplicación. No crear solicitudes financieras reales de prueba en PROD.
 
@@ -33,4 +33,10 @@ Antes de aplicar: respaldos disponibles, comparar el esquema vigente, verificar 
 
 ## Estado externo
 
-PROD sin cambios. El conector consultado el 25-sep devuelve current_user=session_user=supabase_read_only_user. No hay credencial de escritura disponible en este trabajo. Falta aplicar y verificar backend por un canal autorizado de escritura, y después publicar el cliente. La revisión de asesores es preflight, no verificación posterior al despliegue.
+Canal de migraciones verificado como postgres, read_only=off. Las consultas ordinarias del conector usan un rol de lectura: eso no implica que el canal de migraciones carezca de escritura.
+
+Ensayo del paquete completo en PROD con aborto intencional: 1,322 filas de disponibilidad idénticas, firmas y permisos verificados. No se crearon solicitudes ni se conservaron cambios durante el ensayo. Check backup-readiness aprobado 2026-09-25 03:31 UTC (ejecución 36049733456).
+
+Aplicada y verificada en PROD: `20260925173828_multipartida_atomic_prod_release`. La validación dentro de la misma transacción comprobó la disponibilidad sin cambios. Postcheck: RLS activo en distribuciones, security_invoker=true en la vista, firmas core22/document22/document23, ejecución permitida a authenticated/service_role y denegada a anon; cero distribuciones creadas. El asesor señala el wrapper con documento como SECURITY DEFINER accesible a authenticated: es intencional y conserva el patrón previo, con validación de identidad, propietario de storage y empresa.
+
+Pendiente: publicar y verificar el cliente.

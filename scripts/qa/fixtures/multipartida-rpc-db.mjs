@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 
-const migration = readFileSync(new URL('../../../supabase/migrations/20260925155322_multipartida_private_settings_fix.sql', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('./multipartida-release/20260925155322_multipartida_private_settings_fix.sql', import.meta.url), 'utf8')
 const definition = name => {
   const start = migration.indexOf(`create or replace function ${name}(`)
   assert.ok(start >= 0)
@@ -68,7 +68,7 @@ export async function fixture(db = new PGlite()) {
     insert into public.payroll_obligation_settings values('${company}','${shared}',true);
     set test.actor='${actor}';
   `)
-  const hardening = readFileSync(new URL('../../../supabase/migrations/20260925130000_multipartida_prod_hardening.sql', import.meta.url), 'utf8')
+  const hardening = readFileSync(new URL('./multipartida-release/20260925130000_multipartida_prod_hardening.sql', import.meta.url), 'utf8')
   const viewStart = hardening.indexOf('create or replace view public.budget_availability as')
   await db.exec(`create function public.payroll_obligation_budget_totals() returns table(company_id uuid,cost_center_id uuid,budget_category_id uuid,budget_month date,committed numeric,executed numeric) language sql as $$select null::uuid,null::uuid,null::uuid,null::date,null::numeric,null::numeric where false$$;`)
   await db.exec('drop view public.budget_availability')

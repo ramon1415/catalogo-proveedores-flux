@@ -27,4 +27,4 @@ El script crea su propio cluster, elige un puerto libre, usa tres conexiones ind
 
 La migración `20260925160000` transmite el reparto en ambos wrappers; el cliente de este paquete lo envía tanto con archivo como sin él. `multipartida-document-db.test.mjs` comprueba dos líneas + enlace del comprobante, compatibilidad con llamada antigua, rechazo de objetos ajenos y rollback completo cuando falla el enlace. `request-optional-document.test.mjs` prueba la captura React en ambas rutas. La migración `20260925171716` conserva los permisos de ejecución de PROD después de recrear las funciones.
 
-Estas validaciones nuevas son locales. PROD todavía no se ha modificado.
+Estas pruebas de solicitudes son locales. El paquete consolidado fue ensayado en PROD con rollback y aplicado como `20260925173828`; los siete SQL originales se conservan como fixtures de regresión. Ver el informe de release para verificaciones y estado del cliente.

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { fixture, company, actor, approver, provider, cc, ordinary, shared } from './fixtures/multipartida-rpc-db.mjs'
 
-const sql=readFileSync(new URL('../../supabase/migrations/20260925160000_request_with_document_distributions.sql',import.meta.url),'utf8')
+const sql=readFileSync(new URL('./fixtures/multipartida-release/20260925160000_request_with_document_distributions.sql',import.meta.url),'utf8')
 const good=`solicitudes/drafts/${actor}/qa.pdf`, rejected=`solicitudes/drafts/${actor}/reject.pdf`
 const distributions=[{budget_category_id:ordinary,amount:20},{budget_category_id:shared,amount:10}]
 const invoke=(db,{path=good,lines=distributions,legacy=false}={})=>db.query(`select public.create_payment_request_with_document(
@@ -24,7 +24,7 @@ test('document wrapper atomically creates request, distributions and document li
    insert into storage.objects values('payment-receipts','${good}','${actor}'),('payment-receipts','${rejected}','${actor}');`)
   await db.exec(sql)
   await db.exec('create role service_role')
-  await db.exec(readFileSync(new URL('../../supabase/migrations/20260925171716_multipartida_preserve_rpc_permissions.sql',import.meta.url),'utf8'))
+  await db.exec(readFileSync(new URL('./fixtures/multipartida-release/20260925171716_multipartida_preserve_rpc_permissions.sql',import.meta.url),'utf8'))
   const permissions=(await db.query("select proname,has_function_privilege('anon',oid,'execute') anonymous,has_function_privilege('authenticated',oid,'execute') signed_in,has_function_privilege('service_role',oid,'execute') service from pg_proc where proname in ('create_payment_request','create_payment_request_with_document')")).rows
   assert.equal(permissions.length,3)
   assert.ok(permissions.every(p=>!p.anonymous&&p.signed_in&&p.service))
