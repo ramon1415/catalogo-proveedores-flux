@@ -9,7 +9,6 @@ import type {
   ReimbursementItemInsert, ProjectOption, PartidaPrediction, PartidaCandidate,
   RequestAttachment, RequestAttachmentInsert,
 } from './types'
-import type { DistributionInsert } from './multipartida'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
 const UPLOAD_BUCKET = 'payment-receipts'
