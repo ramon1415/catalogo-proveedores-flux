@@ -1,0 +1,184 @@
+name: CONTPAQ R3 ephemeral database
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - supabase/migrations/20260921231129_contpaq_dark_launch_schema_prod_r3.sql
+      - supabase/migrations/20260921231130_contpaq_dark_launch_seed_prod_r3.sql
+      - .github/workflows/contpaq-r3-ephemeral-db.yml
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: flux_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d flux_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: flux_test
+      SCHEMA_MIGRATION: supabase/migrations/20260921231129_contpaq_dark_launch_schema_prod_r3.sql
+      SEED_MIGRATION: supabase/migrations/20260921231130_contpaq_dark_launch_seed_prod_r3.sql
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Create minimal PROD-compatible prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create extension if not exists pgcrypto;
+          do $roles$
+          begin
+            if not exists(select 1 from pg_roles where rolname='anon') then create role anon nologin; end if;
+            if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated nologin; end if;
+            if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role nologin; end if;
+          end
+          $roles$;
+          create table public.companies(
+            id uuid primary key,
+            name text not null,
+            legal_name text,
+            active boolean not null default true
+          );
+          create table public.profiles(id uuid primary key default gen_random_uuid());
+          create table public.budget_categories(
+            id uuid primary key default gen_random_uuid(),
+            code text not null unique,
+            name text not null,
+            category text,
+            active boolean not null default true
+          );
+          create table public.proveedores(id uuid primary key default gen_random_uuid());
+          create table public.company_bank_accounts(
+            id uuid primary key default gen_random_uuid(),
+            company_id uuid not null references public.companies(id)
+          );
+          create table public.payment_requests(id uuid primary key default gen_random_uuid());
+          create table public.company_cost_center_budget_categories(
+            company_id uuid not null references public.companies(id),
+            budget_category_id uuid not null references public.budget_categories(id),
+            active boolean not null default true
+          );
+          create or replace function public.flux_sysadmin_roles()
+          returns text[] language sql immutable as $$select array['sysadmin']::text[]$$;
+          create or replace function public.current_user_has_role(text[])
+          returns boolean language sql stable as $$select true$$;
+
+          insert into public.companies(id,name,legal_name,active) values
+            ('144042c1-e493-4256-a86c-cd088a8898ce','Operadora Tlacatecpan','OPERADORA TLACATECPAN',true),
+            ('20cd72aa-f281-4985-931b-a83422404b66','Soporte Fersana','Soporte Fersana, SA de CV',true);
+          SQL
+
+      - name: Materialize only the budget categories referenced by the seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/categories.sql
+          import pathlib,re
+          text=pathlib.Path('supabase/migrations/20260921231130_contpaq_dark_launch_seed_prod_r3.sql').read_text()
+          sf_start=text.index('-- Mapeo partida→cuenta · Soporte Fersana')
+          op_start=text.index('-- Snapshot read-only de DEV',sf_start)
+          tax_start=text.index('insert into public.tax_account_mappings',op_start)
+          def codes(block):
+              return [m.group(1) for m in re.finditer(r"^\s*\(\s*'([^']+)'", block, re.M)]
+          sf=codes(text[sf_start:op_start])
+          op=codes(text[op_start:tax_start])
+          assert len(sf)==60 and len(set(sf))==60, (len(sf),len(set(sf)))
+          assert len(op)==83 and len(set(op))==83, (len(op),len(set(op)))
+          assert not any(c.startswith('AUTO-') or c.startswith('OP-') or c.startswith('REC-') for c in op)
+          all_codes=[]
+          for c in sf+op+['FONACOT']:
+              if c not in all_codes: all_codes.append(c)
+          for c in all_codes:
+              q=c.replace("'","''")
+              print(f"insert into public.budget_categories(code,name,category,active) values ('{q}','{q}','QA',true) on conflict(code) do nothing;")
+          for c in op:
+              q=c.replace("'","''")
+              print("insert into public.company_cost_center_budget_categories(company_id,budget_category_id,active) "
+                    f"select '144042c1-e493-4256-a86c-cd088a8898ce'::uuid,id,true from public.budget_categories where code='{q}';")
+          for c in sf:
+              q=c.replace("'","''")
+              print("insert into public.company_cost_center_budget_categories(company_id,budget_category_id,active) "
+                    f"select '20cd72aa-f281-4985-931b-a83422404b66'::uuid,id,true from public.budget_categories where code='{q}';")
+          PY
+          psql -v ON_ERROR_STOP=1 -f /tmp/categories.sql
+
+      - name: Apply R3 schema migration to ephemeral PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f "$SCHEMA_MIGRATION"
+
+      - name: Apply full deterministic R3 seed to ephemeral PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f "$SEED_MIGRATION"
+
+      - name: Verify postconditions and R3-specific contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/postcheck.txt
+          select 'opt_accounts='||count(*) from public.contpaq_accounts where company_id='144042c1-e493-4256-a86c-cd088a8898ce';
+          select 'sf_accounts='||count(*) from public.contpaq_accounts where company_id='20cd72aa-f281-4985-931b-a83422404b66';
+          select 'opt_maps='||count(*) from public.budget_account_mappings where company_id='144042c1-e493-4256-a86c-cd088a8898ce';
+          select 'sf_maps='||count(*) from public.budget_account_mappings where company_id='20cd72aa-f281-4985-931b-a83422404b66';
+          select 'opt_reviews='||count(*) from public.budget_account_mappings where company_id='144042c1-e493-4256-a86c-cd088a8898ce' and needs_review;
+          select 'provider_account_nullable='||(is_nullable='YES') from information_schema.columns
+            where table_schema='public' and table_name='provider_account_mappings' and column_name='contpaq_account_code';
+          select 'mapper_security_invoker='||coalesce(array_position(c.reloptions,'security_invoker=true') is not null,false)
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relname='contpaq_account_mapper_candidates';
+          select 'confirm_provider_invoker='||not p.prosecdef
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public' and p.proname='confirm_provider_account';
+          SQL
+          cat /tmp/postcheck.txt
+          grep -Fxq 'opt_accounts=1646' /tmp/postcheck.txt
+          grep -Fxq 'sf_accounts=694' /tmp/postcheck.txt
+          grep -Fxq 'opt_maps=83' /tmp/postcheck.txt
+          grep -Fxq 'sf_maps=60' /tmp/postcheck.txt
+          grep -Fxq 'opt_reviews=4' /tmp/postcheck.txt
+          grep -Fxq 'provider_account_nullable=true' /tmp/postcheck.txt
+          grep -Fxq 'mapper_security_invoker=true' /tmp/postcheck.txt
+          grep -Fxq 'confirm_provider_invoker=true' /tmp/postcheck.txt
+
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          insert into public.proveedores(id) values ('00000000-0000-0000-0000-000000000001');
+          insert into public.provider_account_mappings(company_id,proveedor_id,contpaq_account_code,contpaq_provider_id)
+          values (
+            '144042c1-e493-4256-a86c-cd088a8898ce',
+            '00000000-0000-0000-0000-000000000001',
+            null,
+            '12345'
+          );
+          do $$
+          begin
+            if not exists(
+              select 1 from public.provider_account_mappings
+              where proveedor_id='00000000-0000-0000-0000-000000000001'
+                and contpaq_account_code is null
+                and contpaq_provider_id='12345'
+            ) then raise exception 'provider_tercero_without_account_failed'; end if;
+          end $$;
+          SQL
