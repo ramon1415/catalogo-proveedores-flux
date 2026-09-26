@@ -360,6 +360,18 @@ export type RequestPayload = {
   // Señalización opcional: el solicitante no está seguro de la partida y pide
   // que Finanzas la confirme. No bloquea nada.
   partida_unsure: boolean
+  // Multi-partida: reparto explícito de la base en N líneas. Cuando viene con
+  // líneas, el RPC valida cada una contra el disponible de SU partida y las
+  // inserta en la MISMA transacción. Ausente/vacío = una sola partida.
+  distributions?: DistributionPayloadLine[] | null
+}
+
+// Línea de distribución tal como viaja al RPC create_payment_request
+// (p_distributions). No lleva payment_request_id: el RPC lo asigna.
+export type DistributionPayloadLine = {
+  budget_category_id: string
+  cost_center_id: string | null
+  amount: number
 }
 
 export type EditPayload = {

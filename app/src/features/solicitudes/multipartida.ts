@@ -130,3 +130,27 @@ export function toDistributionInserts(
       amount: round2(toNumber(line.amount)),
     }))
 }
+
+// Línea de distribución para el RPC transaccional (create_payment_request /
+// p_distributions). NO lleva payment_request_id: el RPC lo asigna al insertar
+// las líneas en la misma transacción que la solicitud. Es la vía correcta para
+// multi-partida (valida cada línea contra el disponible de SU partida ANTES de
+// crear, sin auto-conteo). Descarta líneas vacías por robustez.
+export type DistributionPayloadLine = {
+  budget_category_id: string
+  cost_center_id: string | null
+  amount: number
+}
+
+export function toDistributionPayload(
+  lines: DistributionLine[],
+  costCenterId: string | null,
+): DistributionPayloadLine[] {
+  return lines
+    .filter((line) => line.budgetCategoryId && toNumber(line.amount) > 0)
+    .map((line) => ({
+      budget_category_id: line.budgetCategoryId,
+      cost_center_id: costCenterId,
+      amount: round2(toNumber(line.amount)),
+    }))
+}
